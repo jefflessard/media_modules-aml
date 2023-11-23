@@ -12136,6 +12136,11 @@ static struct codec_profile_t ammvdec_h264_profile = {
 	.profile = ""
 };
 
+static struct codec_profile_t ammvdec_h264_single_profile = {
+	.name = "h264",
+	.profile = "4k"
+};
+
 static struct mconfig hm264_configs[] = {
 	MC_PU32("h264_debug_flag", &h264_debug_flag),
 	MC_PI32("start_decode_buf_level", &start_decode_buf_level),
@@ -12194,6 +12199,7 @@ static int __init ammvdec_h264_driver_init_module(void)
 	}
 
 	vcodec_profile_register(&ammvdec_h264_profile);
+	vcodec_profile_register(&ammvdec_h264_single_profile);
 	INIT_REG_NODE_CONFIGS("media.decoder", &hm264_node,
 	"mh264", hm264_configs, CONFIG_FOR_RW);
 
