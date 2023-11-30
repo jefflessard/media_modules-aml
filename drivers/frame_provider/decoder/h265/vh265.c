@@ -1614,7 +1614,6 @@ struct PIC_s {
 	char *hdr10p_data_buf;
 	struct dma_fence *fence;
 	bool show_frame;
-	u32 sei_present_flag;
 } /*PIC_t */;
 
 #define MAX_TILE_COL_NUM    10
@@ -1918,6 +1917,7 @@ struct hevc_state_s {
 	int fatal_error;
 
 	u32 sei_hdr10_flag;
+	u32 sei_present_flag;
 	void *frame_mmu_map_addr;
 	dma_addr_t frame_mmu_map_phy_addr;
 	unsigned int mmu_mc_buf_start;
@@ -2505,6 +2505,7 @@ static void hevc_init_stru(struct hevc_state_s *hevc,
 	hevc->pre_bot_pic = NULL;
 
 	hevc->sei_hdr10_flag = 0;
+	hevc->sei_present_flag = 0;
 	hevc->valve_count = 0;
 	hevc->first_pic_flag = 0;
 #ifdef MULTI_INSTANCE_SUPPORT
@@ -5869,7 +5870,6 @@ static struct PIC_s *get_new_pic(struct hevc_state_s *hevc,
 		new_pic->recon_mark = 0;
 		new_pic->error_mark = 0;
 		new_pic->dis_mark = 0;
-		new_pic->sei_present_flag = 0;
 		/* new_pic->output_ready = 0; */
 		new_pic->num_reorder_pic = rpm_param->p.sps_num_reorder_pics_0;
 		new_pic->ip_mode = (!new_pic->num_reorder_pic &&
@@ -8032,7 +8032,7 @@ static int parse_sei(struct hevc_state_s *hevc,
 					&& p_sei[3] == 0x00
 					&& p_sei[4] == 0x01
 					&& p_sei[5] == 0x04) {
-					pic->sei_present_flag |= SEI_HDR10PLUS_MASK;
+					hevc->sei_present_flag |= SEI_HDR10PLUS_MASK;
 					if ((payload_size > 0) && (payload_size <= HDR10P_BUF_SIZE) &&
 						(pic->hdr10p_data_buf != NULL)) {
 						memcpy(pic->hdr10p_data_buf, p_sei, payload_size);
@@ -8058,7 +8058,7 @@ static int parse_sei(struct hevc_state_s *hevc,
 					&& p_sei[2] == 0x3D
 					&& p_sei[3] == 0x01
 					&& p_sei[4] == 0x00) {
-					pic->sei_present_flag |= SEI_HDR_FMM_MASK;
+					hevc->sei_present_flag |= SEI_HDR_FMM_MASK;
 					if (get_dbg_flag(hevc) & H265_DEBUG_PRINT_SEI) {
 						PR_INIT(128);
 						hevc_print(hevc, 0,
@@ -8076,7 +8076,7 @@ static int parse_sei(struct hevc_state_s *hevc,
 					&& p_sei[2] == 0x04
 					&& p_sei[3] == 0x00
 					&& p_sei[4] == 0x05) {
-					pic->sei_present_flag |= SEI_HDR_CUVA_MASK;
+					hevc->sei_present_flag |= SEI_HDR_CUVA_MASK;
 
 					if (get_dbg_flag(hevc) & H265_DEBUG_PRINT_SEI) {
 						hevc_print(hevc, 0,
@@ -8247,7 +8247,7 @@ static void set_frame_info(struct hevc_state_s *hevc, struct vframe_s *vf,
 			vf->signal_type = vf->signal_type & 0xff000000;
 			vf->signal_type = vf->signal_type | 0x20202;
 		}
-		if (pic->sei_present_flag & SEI_HDR10PLUS_MASK) {
+		if (hevc->sei_present_flag & SEI_HDR10PLUS_MASK) {
 			u32 data;
 			data = vf->signal_type;
 			data = data & 0xFFFF00FF;
@@ -8255,7 +8255,7 @@ static void set_frame_info(struct hevc_state_s *hevc, struct vframe_s *vf,
 			vf->signal_type = data;
 		}
 
-		if (pic->sei_present_flag & SEI_HDR_CUVA_MASK) {
+		if (hevc->sei_present_flag & SEI_HDR_CUVA_MASK) {
 			u32 data;
 			data = vf->signal_type;
 			data = data & 0x7FFFFFFF;
@@ -8263,7 +8263,7 @@ static void set_frame_info(struct hevc_state_s *hevc, struct vframe_s *vf,
 			vf->signal_type = data;
 		}
 
-		if (pic->sei_present_flag & SEI_HDR_FMM_MASK) {
+		if (hevc->sei_present_flag & SEI_HDR_FMM_MASK) {
 			u32 data;
 			data = vf->ext_signal_type;
 			data = data & 0xFFFFFFFE;
@@ -9472,7 +9472,7 @@ static int post_video_frame(struct vdec_s *vdec, struct PIC_s *pic)
 		hevc_print(hevc, H265_DEBUG_PRINT_SEI,
 			"aux_data_size:%d signal_type:0x%x ext_signal_type:0x%x sei_present_flag:%d/%d inst_cnt:%d vf:%p\n",
 			hevc->m_PIC[index]->aux_data_size, vf->signal_type, vf->ext_signal_type,
-			pic->sei_present_flag, hevc->sei_hdr10_flag, vdec->inst_cnt, vf);
+			hevc->sei_present_flag, hevc->sei_hdr10_flag, vdec->inst_cnt, vf);
 
 		if (get_dbg_flag(hevc) & H265_DEBUG_PRINT_SEI) {
 			int i = 0;
@@ -9662,6 +9662,7 @@ static void process_nal_sei(struct hevc_state_s *hevc,
 						i, hevc->luminance[i]);
 			}
 			hevc->sei_hdr10_flag |= SEI_MASTER_DISPLAY_COLOR_MASK;
+			hevc->sei_present_flag |= SEI_MASTER_DISPLAY_COLOR_MASK;
 		}
 		payload_size -= 24;
 		while (payload_size > 0) {
@@ -10557,6 +10558,7 @@ force_output:
 		int parse_type = HEVC_DISCARD_NAL;
 
 		hevc->error_watchdog_count = 0;
+		hevc->sei_present_flag = 0;
 		hevc->error_skip_nal_wt_cnt = 0;
 		if (slice_parse_begin > 0 &&
 			get_dbg_flag(hevc) & H265_DEBUG_DISCARD_NAL) {
