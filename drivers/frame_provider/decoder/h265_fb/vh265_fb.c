@@ -229,6 +229,13 @@ static struct vframe_provider_s vh265_vf_prov;
 #define UCODE_SWAP_VERSION 3
 #define UCODE_SWAP_SUBMIT_COUNT 42
 
+struct ucode_version_s {
+	unsigned int major;
+	unsigned int minor;
+	unsigned int patch;
+};
+extern struct ucode_version_s ucode_version;
+
 static u32 enable_swap = 1;
 static u32 bit_depth_luma;
 static u32 bit_depth_chroma;
@@ -16207,6 +16214,8 @@ static int ammvdec_h265_probe(struct platform_device *pdev)
 	pdata->run_ready = run_ready;
 	pdata->run = run;
 #ifdef NEW_FB_CODE
+	if ((ucode_version.major == 0) && (ucode_version.minor <= 4) && (ucode_version.patch < 51))
+		front_back_mode = 0;
 	hevc->front_back_mode = front_back_mode;
 	hevc->fb_ifbuf_num = fb_ifbuf_num;
 	if (hevc->fb_ifbuf_num > MAX_FB_IFBUF_NUM)
