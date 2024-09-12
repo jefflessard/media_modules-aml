@@ -41,9 +41,6 @@
 #define AMVENC_DEVINFO_GXTVBB "AML-GXTVBB"
 #define AMVENC_DEVINFO_GXL "AML-GXL"
 
-#define HCODEC_IRQ_MBOX_CLR HCODEC_ASSIST_MBOX2_CLR_REG
-#define HCODEC_IRQ_MBOX_MASK HCODEC_ASSIST_MBOX2_MASK
-
 #define H264_ENC_SVC
 
 /* M8: 2550/10 = 255M GX: 2000/10 = 200M */
@@ -129,13 +126,6 @@
 #define AMVENC_AVC_IOC_SUBMIT	_IOW(AMVENC_AVC_IOC_MAGIC, 0x09, u32)
 #define AMVENC_AVC_IOC_READ_CANVAS _IOW(AMVENC_AVC_IOC_MAGIC, 0x0a, u32)
 #define AMVENC_AVC_IOC_QP_MODE _IOW(AMVENC_AVC_IOC_MAGIC, 0x0b, u32)
-
-
-
-#define IE_PIPELINE_BLOCK_SHIFT 0
-#define IE_PIPELINE_BLOCK_MASK  0x1f
-#define ME_PIXEL_MODE_SHIFT 5
-#define ME_PIXEL_MODE_MASK  0x3
 
 enum amvenc_mem_type_e {
 	LOCAL_BUFF = 0,
@@ -396,110 +386,6 @@ struct encode_manager_s {
 extern s32 encode_wq_add_request(struct encode_wq_s *wq);
 extern struct encode_wq_s *create_encode_work_queue(void);
 extern s32 destroy_encode_work_queue(struct encode_wq_s *encode_work_queue);
-
-/********************************************
- *  AV Scratch Register Re-Define
- ****************************************** *
- */
-#define ENCODER_STATUS            HCODEC_HENC_SCRATCH_0
-#define MEM_OFFSET_REG            HCODEC_HENC_SCRATCH_1
-#define DEBUG_REG                 HCODEC_HENC_SCRATCH_2
-#define IDR_PIC_ID                HCODEC_HENC_SCRATCH_5
-#define FRAME_NUMBER              HCODEC_HENC_SCRATCH_6
-#define PIC_ORDER_CNT_LSB         HCODEC_HENC_SCRATCH_7
-#define LOG2_MAX_PIC_ORDER_CNT_LSB  HCODEC_HENC_SCRATCH_8
-#define LOG2_MAX_FRAME_NUM          HCODEC_HENC_SCRATCH_9
-#define ANC0_BUFFER_ID              HCODEC_HENC_SCRATCH_A
-#define QPPICTURE                   HCODEC_HENC_SCRATCH_B
-
-#define IE_ME_MB_TYPE               HCODEC_HENC_SCRATCH_D
-
-/* bit 0-4, IE_PIPELINE_BLOCK
- * bit 5    me half pixel in m8
- *		disable i4x4 in gxbb
- * bit 6    me step2 sub pixel in m8
- *		disable i16x16 in gxbb
- */
-#define IE_ME_MODE                  HCODEC_HENC_SCRATCH_E
-#define IE_REF_SEL                  HCODEC_HENC_SCRATCH_F
-
-/* [31:0] NUM_ROWS_PER_SLICE_P */
-/* [15:0] NUM_ROWS_PER_SLICE_I */
-#define FIXED_SLICE_CFG             HCODEC_HENC_SCRATCH_L
-
-/* For GX */
-#define INFO_DUMP_START_ADDR      HCODEC_HENC_SCRATCH_I
-
-/* For CBR */
-#define H264_ENC_CBR_TABLE_ADDR   HCODEC_HENC_SCRATCH_3
-#define H264_ENC_CBR_MB_SIZE_ADDR      HCODEC_HENC_SCRATCH_4
-/* Bytes(Float) * 256 */
-#define H264_ENC_CBR_CTL          HCODEC_HENC_SCRATCH_G
-/* [31:28] : init qp table idx */
-/* [27:24] : short_term adjust shift */
-/* [23:16] : Long_term MB_Number between adjust, */
-/* [15:0] Long_term adjust threshold(Bytes) */
-#define H264_ENC_CBR_TARGET_SIZE  HCODEC_HENC_SCRATCH_H
-/* Bytes(Float) * 256 */
-#define H264_ENC_CBR_PREV_BYTES   HCODEC_HENC_SCRATCH_J
-#define H264_ENC_CBR_REGION_SIZE   HCODEC_HENC_SCRATCH_J
-
-/* for SVC */
-#define H264_ENC_SVC_PIC_TYPE      HCODEC_HENC_SCRATCH_K
-
-/* define for PIC  header */
-#define ENC_SLC_REF 0x8410
-#define ENC_SLC_NON_REF 0x8010
-
-/* --------------------------------------------------- */
-/* ENCODER_STATUS define */
-/* --------------------------------------------------- */
-#define ENCODER_IDLE              0
-#define ENCODER_SEQUENCE          1
-#define ENCODER_PICTURE           2
-#define ENCODER_IDR               3
-#define ENCODER_NON_IDR           4
-#define ENCODER_MB_HEADER         5
-#define ENCODER_MB_DATA           6
-
-#define ENCODER_SEQUENCE_DONE          7
-#define ENCODER_PICTURE_DONE           8
-#define ENCODER_IDR_DONE               9
-#define ENCODER_NON_IDR_DONE           10
-#define ENCODER_MB_HEADER_DONE         11
-#define ENCODER_MB_DATA_DONE           12
-
-#define ENCODER_NON_IDR_INTRA     13
-#define ENCODER_NON_IDR_INTER     14
-
-#define ENCODER_ERROR     0xff
-
-/********************************************
- * defines for H.264 mb_type
- *******************************************
- */
-#define HENC_MB_Type_PBSKIP                      0x0
-#define HENC_MB_Type_PSKIP                       0x0
-#define HENC_MB_Type_BSKIP_DIRECT                0x0
-#define HENC_MB_Type_P16x16                      0x1
-#define HENC_MB_Type_P16x8                       0x2
-#define HENC_MB_Type_P8x16                       0x3
-#define HENC_MB_Type_SMB8x8                      0x4
-#define HENC_MB_Type_SMB8x4                      0x5
-#define HENC_MB_Type_SMB4x8                      0x6
-#define HENC_MB_Type_SMB4x4                      0x7
-#define HENC_MB_Type_P8x8                        0x8
-#define HENC_MB_Type_I4MB                        0x9
-#define HENC_MB_Type_I16MB                       0xa
-#define HENC_MB_Type_IBLOCK                      0xb
-#define HENC_MB_Type_SI4MB                       0xc
-#define HENC_MB_Type_I8MB                        0xd
-#define HENC_MB_Type_IPCM                        0xe
-#define HENC_MB_Type_AUTO                        0xf
-
-#define HENC_MB_CBP_AUTO                         0xff
-#define HENC_SKIP_RUN_AUTO                     0xffff
-
 
 extern bool amvenc_avc_on(void);
 #endif
