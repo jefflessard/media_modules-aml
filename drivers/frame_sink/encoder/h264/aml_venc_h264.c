@@ -17,8 +17,14 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
  */
 #include <linux/types.h>
+
+#ifdef CONFIG_AMLOGIC_MEDIA_MODULE
+#include "../../../common/chips/decoder_cpu_ver_info.h"
 // #include <linux/amlogic/media/registers/register.h>
 #include "../../../frame_provider/decoder/utils/vdec.h"
+#else
+#include "amlogic.h"
+#endif
 
 #include "aml_venc_h264.h"
 
@@ -119,6 +125,62 @@
 /* shift 8-bits, 2, 1, 0, -1, -2, -3, -4 */
 #define v5_simple_dq_setting 0x43210fed
 #define v5_simple_me_weight_setting 0
+
+
+/********************************************
+ *  AV Scratch Register Re-Define
+ ****************************************** *
+ */
+#define ENCODER_STATUS            HCODEC_HENC_SCRATCH_0
+	//enum amlvenc_hcodec_encoder_status
+
+#define MEM_OFFSET_REG            HCODEC_HENC_SCRATCH_1
+#define DEBUG_REG                 HCODEC_HENC_SCRATCH_2
+#define IDR_PIC_ID                HCODEC_HENC_SCRATCH_5
+#define FRAME_NUMBER              HCODEC_HENC_SCRATCH_6
+#define PIC_ORDER_CNT_LSB         HCODEC_HENC_SCRATCH_7
+#define LOG2_MAX_PIC_ORDER_CNT_LSB  HCODEC_HENC_SCRATCH_8
+#define LOG2_MAX_FRAME_NUM          HCODEC_HENC_SCRATCH_9
+#define ANC0_BUFFER_ID              HCODEC_HENC_SCRATCH_A
+#define QPPICTURE                   HCODEC_HENC_SCRATCH_B
+
+#define IE_ME_MB_TYPE               HCODEC_HENC_SCRATCH_D
+
+/* bit 0-4, IE_PIPELINE_BLOCK
+ * bit 5    me half pixel in m8
+ *		disable i4x4 in gxbb
+ * bit 6    me step2 sub pixel in m8
+ *		disable i16x16 in gxbb
+ */
+#define IE_ME_MODE                  HCODEC_HENC_SCRATCH_E
+#define IE_REF_SEL                  HCODEC_HENC_SCRATCH_F
+
+/* For GX */
+#define INFO_DUMP_START_ADDR      HCODEC_HENC_SCRATCH_I
+
+/* [31:0] NUM_ROWS_PER_SLICE_P */
+/* [15:0] NUM_ROWS_PER_SLICE_I */
+#define FIXED_SLICE_CFG             HCODEC_HENC_SCRATCH_L
+
+/* for SVC */
+#define H264_ENC_SVC_PIC_TYPE      HCODEC_HENC_SCRATCH_K
+	/* define for PIC  header */
+	#define ENC_SLC_REF 0x8410
+	#define ENC_SLC_NON_REF 0x8010
+
+/* For CBR */
+#define H264_ENC_CBR_TABLE_ADDR   HCODEC_HENC_SCRATCH_3
+#define H264_ENC_CBR_MB_SIZE_ADDR      HCODEC_HENC_SCRATCH_4
+/* Bytes(Float) * 256 */
+#define H264_ENC_CBR_CTL          HCODEC_HENC_SCRATCH_G
+/* [31:28] : init qp table idx */
+/* [27:24] : short_term adjust shift */
+/* [23:16] : Long_term MB_Number between adjust, */
+/* [15:0] Long_term adjust threshold(Bytes) */
+#define H264_ENC_CBR_TARGET_SIZE  HCODEC_HENC_SCRATCH_H
+/* Bytes(Float) * 256 */
+#define H264_ENC_CBR_PREV_BYTES   HCODEC_HENC_SCRATCH_J
+#define H264_ENC_CBR_REGION_SIZE   HCODEC_HENC_SCRATCH_J
 
 
 /* for temp */
@@ -275,26 +337,6 @@ const struct amlvenc_h264_snr_params amlvenc_h264_snr_defaults = {
 	.beta_max = 63,
 };
 
-static void amlvenc_h264_write_quant_table(uint32_t table_addr, const uint32_t *quant_tbl)
-{
-    int i;
-
-    WRITE_HREG(HCODEC_Q_QUANT_CONTROL,
-               (table_addr << 23) | /* quant_table_addr */
-               (1 << 22)); /* quant_table_addr_update */
-
-    for (i = 0; i < QTABLE_SIZE; i++) {
-        WRITE_HREG(HCODEC_QUANT_TABLE_DATA, quant_tbl[i]);
-    }
-}
-
-void amlvenc_h264_init_qtable(const struct amlvenc_h264_qtable_params *p)
-{
-    amlvenc_h264_write_quant_table(0, p->quant_tbl_i4);
-    amlvenc_h264_write_quant_table(8, p->quant_tbl_i16);
-    amlvenc_h264_write_quant_table(16, p->quant_tbl_me);
-}
-
 void amlvenc_h264_init_me(struct amlvenc_h264_me_params *p)
 {
 	p->me_mv_merge_ctl =
@@ -354,7 +396,7 @@ void amlvenc_h264_init_me(struct amlvenc_h264_me_params *p)
                        /* force_skip_weight_0 */
                        (STEP_0_SKIP_WEIGHT << 0);
 
-	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_GXTVBB)
+	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXTVBB)
     {
 		p->me_f_skip_sad = 0;
 		p->me_f_skip_weight = 0;
@@ -377,61 +419,6 @@ void amlvenc_h264_init_me(struct amlvenc_h264_me_params *p)
                        (0 << 0);   /* me_sad_enough_2 */
 }
 
-void amlvenc_h264_init_output_stream_buffer(u32 bitstreamStart, u32 bitstreamEnd)
-{
-    WRITE_HREG(HCODEC_VLC_VB_MEM_CTL,
-               ((1 << 31) | (0x3f << 24) |
-                (0x20 << 16) | (2 << 0)));
-    WRITE_HREG(HCODEC_VLC_VB_START_PTR, bitstreamStart);
-    WRITE_HREG(HCODEC_VLC_VB_WR_PTR, bitstreamStart);
-    WRITE_HREG(HCODEC_VLC_VB_SW_RD_PTR, bitstreamStart);
-    WRITE_HREG(HCODEC_VLC_VB_END_PTR, bitstreamEnd);
-    WRITE_HREG(HCODEC_VLC_VB_CONTROL, 1);
-    WRITE_HREG(HCODEC_VLC_VB_CONTROL,
-               ((0 << 14) | (7 << 3) |
-                (1 << 1) | (0 << 0)));
-}
-
-void amlvenc_h264_init_input_dct_buffer(u32 dct_buff_start_addr, u32 dct_buff_end_addr)
-{
-    WRITE_HREG(HCODEC_QDCT_MB_START_PTR, dct_buff_start_addr);
-    WRITE_HREG(HCODEC_QDCT_MB_END_PTR, dct_buff_end_addr);
-    WRITE_HREG(HCODEC_QDCT_MB_WR_PTR, dct_buff_start_addr);
-    WRITE_HREG(HCODEC_QDCT_MB_RD_PTR, dct_buff_start_addr);
-    WRITE_HREG(HCODEC_QDCT_MB_BUFF, 0);
-}
-
-void amlvenc_h264_init_me_parameters(const struct amlvenc_h264_me_params *p)
-{
-    WRITE_HREG(HCODEC_ME_MV_MERGE_CTL, p->me_mv_merge_ctl);
-    WRITE_HREG(HCODEC_ME_STEP0_CLOSE_MV, p->me_step0_close_mv);
-    WRITE_HREG(HCODEC_ME_SAD_ENOUGH_01, p->me_sad_enough_01);
-    WRITE_HREG(HCODEC_ME_SAD_ENOUGH_23, p->me_sad_enough_23);
-    WRITE_HREG(HCODEC_ME_F_SKIP_SAD, p->me_f_skip_sad);
-    WRITE_HREG(HCODEC_ME_F_SKIP_WEIGHT, p->me_f_skip_weight);
-    WRITE_HREG(HCODEC_ME_MV_WEIGHT_01, p->me_mv_weight_01);
-    WRITE_HREG(HCODEC_ME_MV_WEIGHT_23, p->me_mv_weight_23);
-    WRITE_HREG(HCODEC_ME_SAD_RANGE_INC, p->me_sad_range_inc);
-}
-
-void amlvenc_h264_init_input_reference_buffer(s32 canvas)
-{
-    WRITE_HREG(HCODEC_ANC0_CANVAS_ADDR, canvas);
-    WRITE_HREG(HCODEC_VLC_HCMD_CONFIG, 0);
-}
-
-void amlvenc_h264_init_firmware_assist_buffer(u32 assit_buffer_offset)
-{
-    WRITE_HREG(MEM_OFFSET_REG, assit_buffer_offset);
-}
-
-void amlvenc_h264_init_dblk_buffer(s32 canvas)
-{
-    WRITE_HREG(HCODEC_REC_CANVAS_ADDR, canvas);
-    WRITE_HREG(HCODEC_DBKR_CANVAS_ADDR, canvas);
-    WRITE_HREG(HCODEC_DBKW_CANVAS_ADDR, canvas);
-}
-
 void amlvenc_h264_init_encoder(const struct amlvenc_h264_init_encoder_params *p) {
 	WRITE_HREG(HCODEC_VLC_TOTAL_BYTES, 0);
 	WRITE_HREG(HCODEC_VLC_CONFIG, 0x07);
@@ -451,6 +438,81 @@ void amlvenc_h264_init_encoder(const struct amlvenc_h264_init_encoder_params *p)
 	WRITE_HREG(QPPICTURE, p->init_qppicture);
 }
 
+void amlvenc_h264_init_firmware_assist_buffer(u32 assit_buffer_offset)
+{
+    WRITE_HREG(MEM_OFFSET_REG, assit_buffer_offset);
+}
+
+void amlvenc_h264_init_input_dct_buffer(u32 dct_buff_start_addr, u32 dct_buff_end_addr)
+{
+    WRITE_HREG(HCODEC_QDCT_MB_START_PTR, dct_buff_start_addr);
+    WRITE_HREG(HCODEC_QDCT_MB_END_PTR, dct_buff_end_addr);
+    WRITE_HREG(HCODEC_QDCT_MB_WR_PTR, dct_buff_start_addr);
+    WRITE_HREG(HCODEC_QDCT_MB_RD_PTR, dct_buff_start_addr);
+    WRITE_HREG(HCODEC_QDCT_MB_BUFF, 0);
+}
+
+void amlvenc_h264_init_input_reference_buffer(s32 canvas)
+{
+    WRITE_HREG(HCODEC_ANC0_CANVAS_ADDR, canvas);
+    WRITE_HREG(HCODEC_VLC_HCMD_CONFIG, 0);
+}
+
+void amlvenc_h264_init_dblk_buffer(s32 canvas)
+{
+    WRITE_HREG(HCODEC_REC_CANVAS_ADDR, canvas);
+    WRITE_HREG(HCODEC_DBKR_CANVAS_ADDR, canvas);
+    WRITE_HREG(HCODEC_DBKW_CANVAS_ADDR, canvas);
+}
+
+void amlvenc_h264_init_output_stream_buffer(u32 bitstreamStart, u32 bitstreamEnd)
+{
+    WRITE_HREG(HCODEC_VLC_VB_MEM_CTL,
+               ((1 << 31) | (0x3f << 24) |
+                (0x20 << 16) | (2 << 0)));
+    WRITE_HREG(HCODEC_VLC_VB_START_PTR, bitstreamStart);
+    WRITE_HREG(HCODEC_VLC_VB_WR_PTR, bitstreamStart);
+    WRITE_HREG(HCODEC_VLC_VB_SW_RD_PTR, bitstreamStart);
+    WRITE_HREG(HCODEC_VLC_VB_END_PTR, bitstreamEnd);
+    WRITE_HREG(HCODEC_VLC_VB_CONTROL, 1);
+    WRITE_HREG(HCODEC_VLC_VB_CONTROL,
+               ((0 << 14) | (7 << 3) |
+                (1 << 1) | (0 << 0)));
+}
+
+static void amlvenc_h264_write_quant_table(uint32_t table_addr, const uint32_t *quant_tbl)
+{
+    int i;
+
+    WRITE_HREG(HCODEC_Q_QUANT_CONTROL,
+               (table_addr << 23) | /* quant_table_addr */
+               (1 << 22)); /* quant_table_addr_update */
+
+    for (i = 0; i < QTABLE_SIZE; i++) {
+        WRITE_HREG(HCODEC_QUANT_TABLE_DATA, quant_tbl[i]);
+    }
+}
+
+void amlvenc_h264_init_qtable(const struct amlvenc_h264_qtable_params *p)
+{
+    amlvenc_h264_write_quant_table(0, p->quant_tbl_i4);
+    amlvenc_h264_write_quant_table(8, p->quant_tbl_i16);
+    amlvenc_h264_write_quant_table(16, p->quant_tbl_me);
+}
+
+void amlvenc_h264_configure_me(const struct amlvenc_h264_me_params *p)
+{
+    WRITE_HREG(HCODEC_ME_MV_MERGE_CTL, p->me_mv_merge_ctl);
+    WRITE_HREG(HCODEC_ME_STEP0_CLOSE_MV, p->me_step0_close_mv);
+    WRITE_HREG(HCODEC_ME_SAD_ENOUGH_01, p->me_sad_enough_01);
+    WRITE_HREG(HCODEC_ME_SAD_ENOUGH_23, p->me_sad_enough_23);
+    WRITE_HREG(HCODEC_ME_F_SKIP_SAD, p->me_f_skip_sad);
+    WRITE_HREG(HCODEC_ME_F_SKIP_WEIGHT, p->me_f_skip_weight);
+    WRITE_HREG(HCODEC_ME_MV_WEIGHT_01, p->me_mv_weight_01);
+    WRITE_HREG(HCODEC_ME_MV_WEIGHT_23, p->me_mv_weight_23);
+    WRITE_HREG(HCODEC_ME_SAD_RANGE_INC, p->me_sad_range_inc);
+}
+
 void amlvenc_h264_configure_ie_me(enum amlvenc_henc_mb_type ie_me_mb_type) {
 	u32 ie_cur_ref_sel = 0;
 	u32 ie_pipeline_block = 12;
@@ -464,7 +526,7 @@ void amlvenc_h264_configure_ie_me(enum amlvenc_henc_mb_type ie_me_mb_type) {
 	WRITE_HREG(IE_ME_MB_TYPE, ie_me_mb_type);
 }
 
-void amlvenc_h264_configure_slice(u32 fixed_slice_cfg, u32 rows_per_slice, u32 encoder_height)
+void amlvenc_h264_configure_fixed_slice(u32 fixed_slice_cfg, u32 rows_per_slice, u32 encoder_height)
 {
 #ifdef MULTI_SLICE_MC
     if (fixed_slice_cfg)
@@ -481,6 +543,10 @@ void amlvenc_h264_configure_slice(u32 fixed_slice_cfg, u32 rows_per_slice, u32 e
 #else
 	WRITE_HREG(FIXED_SLICE_CFG, 0);
 #endif
+}
+
+void amlvenc_h264_configure_svc_pic(bool is_slc_ref) {
+	WRITE_HREG(H264_ENC_SVC_PIC_TYPE, is_slc_ref ? ENC_SLC_REF : ENC_SLC_NON_REF);
 }
 
 void amlvenc_h264_configure_mdfin(struct amlvenc_h264_mdfin_params *p) {
@@ -515,7 +581,7 @@ void amlvenc_h264_configure_mdfin(struct amlvenc_h264_mdfin_params *p) {
 	bool linear_enable = false;
 	bool format_err = false;
 
-	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_TXL) {
+	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TXL) {
 		if ((p->iformat == 7) && (p->ifmt_extra > 2))
 			format_err = true;
 	} else if (p->iformat == 7)
@@ -570,7 +636,7 @@ void amlvenc_h264_configure_mdfin(struct amlvenc_h264_mdfin_params *p) {
 	else
 		linear_enable = true;
 
-	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_GXBB) {
+	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXBB) {
 		reg_offset = -8;
 		/* nr_mode: 0:Disabled 1:SNR Only 2:TNR Only 3:3DNR */
 		nr_enable = (p->nr_mode) ? 1 : 0;
@@ -654,7 +720,7 @@ void amlvenc_h264_configure_mdfin(struct amlvenc_h264_mdfin_params *p) {
 			(interp_en << 9) | (p->r2y_en << 12) |
 			(r2y_mode << 13) | (p->ifmt_extra << 16) |
 			(nr_enable << 19));
-		if (get_cpu_type() >= MESON_CPU_MAJOR_ID_SC2) {
+		if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_SC2) {
 			WRITE_HREG((HCODEC_MFDIN_REG8_DMBL + reg_offset),
 				(p->picsize_x << 16) | (p->picsize_y << 0));
 		} else {
@@ -706,7 +772,7 @@ void amlvenc_h264_configure_mdfin(struct amlvenc_h264_mdfin_params *p) {
 			(1 << 18) | (0 << 21));
 }
 
-void amlvenc_h264_init(const struct amlvenc_h264_init_params *p) {
+void amlvenc_h264_configure_encoder(const struct amlvenc_h264_configure_encoder_params *p) {
     u32 data32;
     u32 pic_width, pic_height;
     u32 pic_mb_nr;
@@ -856,7 +922,7 @@ void amlvenc_h264_init(const struct amlvenc_h264_init_params *p) {
 		p_pic_qp = i_pic_qp;
 	}
 #ifdef H264_ENC_CBR
-	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_GXTVBB) {
+	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXTVBB) {
 		data32 = READ_HREG(HCODEC_SAD_CONTROL_1);
 		data32 = data32 & 0xffff; /* remove sad shift */
 		WRITE_HREG(HCODEC_SAD_CONTROL_1, data32);
@@ -1233,7 +1299,7 @@ void amlvenc_h264_init(const struct amlvenc_h264_init_params *p) {
 		(1 << 5)  | /* ignore_cac_coeff_2 (<1) */
 		(3 << 0));  /* ignore_cac_coeff_1 (<2) */
 
-	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_GXTVBB)
+	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXTVBB)
 		WRITE_HREG(HCODEC_IGNORE_CONFIG_2,
 			(1 << 31) | /* ignore_t_lac_coeff_en */
 			(1 << 26) | /* ignore_t_lac_coeff_else (<1) */
@@ -1322,17 +1388,9 @@ void amlvenc_h264_init(const struct amlvenc_h264_init_params *p) {
 		(0 << 6) | /* step_0_skip_line */
 		(0 << 0));
 
-	WRITE_HREG(HCODEC_ME_MV_MERGE_CTL, p->me->me_mv_merge_ctl);
-	WRITE_HREG(HCODEC_ME_STEP0_CLOSE_MV, p->me->me_step0_close_mv);
-	WRITE_HREG(HCODEC_ME_SAD_ENOUGH_01, p->me->me_sad_enough_01);
-	WRITE_HREG(HCODEC_ME_SAD_ENOUGH_23, p->me->me_sad_enough_23);
-	WRITE_HREG(HCODEC_ME_F_SKIP_SAD, p->me->me_f_skip_sad);
-	WRITE_HREG(HCODEC_ME_F_SKIP_WEIGHT, p->me->me_f_skip_weight);
-	WRITE_HREG(HCODEC_ME_MV_WEIGHT_01, p->me->me_mv_weight_01);
-	WRITE_HREG(HCODEC_ME_MV_WEIGHT_23, p->me->me_mv_weight_23);
-	WRITE_HREG(HCODEC_ME_SAD_RANGE_INC, p->me->me_sad_range_inc);
+	amlvenc_h264_configure_me(p->me);
 
-	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_TXL) {
+	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_TXL) {
 		WRITE_HREG(HCODEC_V5_SIMPLE_MB_CTL, 0);
 		WRITE_HREG(HCODEC_V5_SIMPLE_MB_CTL,
 			(v5_use_small_diff_cnt << 7) |
@@ -1357,7 +1415,7 @@ void amlvenc_h264_init(const struct amlvenc_h264_init_params *p) {
 		WRITE_HREG(HCODEC_QDCT_CONFIG, 1 << 0);
 	}
 
-	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_GXL) {
+	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXL) {
 		WRITE_HREG(HCODEC_V4_FORCE_SKIP_CFG,
 			(i_pic_qp << 26) | /* v4_force_q_r_intra */
 			(i_pic_qp << 20) | /* v4_force_q_r_inter */
@@ -1412,7 +1470,7 @@ void amlvenc_h264_init(const struct amlvenc_h264_init_params *p) {
 				(3 << 16) |  /* type_hor break */
 				(V3_ME_F_ZERO_SAD << 0));
 		}
-	} else if (get_cpu_type() >= MESON_CPU_MAJOR_ID_GXTVBB) {
+	} else if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXTVBB) {
 		/* V3 Force skip */
 		WRITE_HREG(HCODEC_V3_SKIP_CONTROL,
 			(1 << 31) | /* v3_skip_enable */
@@ -1439,7 +1497,7 @@ void amlvenc_h264_init(const struct amlvenc_h264_init_params *p) {
 			(3 << 16) |  /* type_hor break */
 			(0 << 0)); /* V3_ME_F_ZERO_SAD */
 	}
-	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_GXTVBB) {
+	if (get_cpu_major_id() >= AM_MESON_CPU_MAJOR_ID_GXTVBB) {
 		int i;
 		/* MV SAD Table */
 		for (i = 0; i < 64; i++)
@@ -1473,62 +1531,6 @@ void amlvenc_h264_init(const struct amlvenc_h264_init_params *p) {
 
 	/* enable mailbox interrupt */
 	WRITE_HREG(HCODEC_IRQ_MBOX_MASK, 1);
-}
-
-void amlvenc_dos_sw_reset(u32 bits)
-{
-	READ_VREG(DOS_SW_RESET1);
-	READ_VREG(DOS_SW_RESET1);
-	READ_VREG(DOS_SW_RESET1);
-	WRITE_VREG(DOS_SW_RESET1, bits);
-	WRITE_VREG(DOS_SW_RESET1, 0);
-	READ_VREG(DOS_SW_RESET1);
-	READ_VREG(DOS_SW_RESET1);
-	READ_VREG(DOS_SW_RESET1);
-}
-
-void amlvenc_hcodec_start(void)
-{
-	WRITE_HREG(HCODEC_MPSR, 0x0001);
-}
-
-void amlvenc_hcodec_stop(void)
-{
-	WRITE_HREG(HCODEC_MPSR, 0);
-	WRITE_HREG(HCODEC_CPSR, 0);
-}
-
-void amlvenc_hcodec_assist_enable(void)
-{
-	WRITE_HREG(HCODEC_ASSIST_MMC_CTRL1, 0x32);
-}
-
-void amlvenc_hcodec_dma_load_firmware(dma_addr_t dma_handle, size_t size)
-{
-    WRITE_HREG(HCODEC_IMEM_DMA_ADR, dma_handle);
-    WRITE_HREG(HCODEC_IMEM_DMA_COUNT, size / 4);
-    // WRITE_HREG(HCODEC_IMEM_DMA_CTRL, (0x8000 | (7 << 16)));
-    WRITE_VREG(HCODEC_IMEM_DMA_CTRL, (0x8000 | (0xf << 16)));
-}
-
-bool amlvenc_hcodec_dma_completed(void)
-{
-	return !(READ_HREG(HCODEC_IMEM_DMA_CTRL) & 0x8000);
-}
-
-enum amlvenc_hcodec_status amlvenc_hcodec_status(void)
-{
-	WRITE_HREG(HCODEC_IRQ_MBOX_CLR, 1);
-	return READ_HREG(ENCODER_STATUS);
-}
-
-void amlvenc_hcodec_clear_status(void)
-{
-	WRITE_HREG(ENCODER_STATUS, ENCODER_IDLE);
-}
-
-void amlvenc_hcodec_set_status(enum amlvenc_hcodec_status status){
-	WRITE_HREG(ENCODER_STATUS, status);
 }
 
 void amlvenc_hcodec_canvas_config(u32 index, ulong addr, u32 width, u32 height, u32 wrap, u32 blkmode) {
@@ -1587,6 +1589,175 @@ void amlvenc_hcodec_canvas_config(u32 index, ulong addr, u32 width, u32 height, 
 	}
 	*/
 }
+
+void amlvenc_hcodec_start(void)
+{
+	WRITE_HREG(HCODEC_MPSR, 0x0001);
+}
+
+void amlvenc_hcodec_stop(void)
+{
+	WRITE_HREG(HCODEC_MPSR, 0);
+	WRITE_HREG(HCODEC_CPSR, 0);
+}
+
+void amlvenc_hcodec_assist_enable(void)
+{
+	WRITE_HREG(HCODEC_ASSIST_MMC_CTRL1, 0x32);
+}
+
+void amlvenc_hcodec_dma_load_firmware(dma_addr_t dma_handle, size_t size)
+{
+    WRITE_HREG(HCODEC_IMEM_DMA_ADR, dma_handle);
+    WRITE_HREG(HCODEC_IMEM_DMA_COUNT, size >> 2);
+    // WRITE_HREG(HCODEC_IMEM_DMA_CTRL, (0x8000 | (7 << 16)));
+    WRITE_VREG(HCODEC_IMEM_DMA_CTRL, (0x8000 | (0xf << 16)));
+}
+
+bool amlvenc_hcodec_dma_completed(void)
+{
+	return !(READ_HREG(HCODEC_IMEM_DMA_CTRL) & 0x8000);
+}
+
+enum amlvenc_hcodec_encoder_status amlvenc_hcodec_encoder_status(void)
+{
+	WRITE_HREG(HCODEC_IRQ_MBOX_CLR, 1);
+	return READ_HREG(ENCODER_STATUS);
+}
+
+void amlvenc_hcodec_clear_encoder_status(void)
+{
+	WRITE_HREG(ENCODER_STATUS, ENCODER_IDLE);
+}
+
+void amlvenc_hcodec_set_encoder_status(enum amlvenc_hcodec_encoder_status status){
+	WRITE_HREG(ENCODER_STATUS, status);
+}
+
+u32 amlvenc_hcodec_mb_info(void)
+{
+	return READ_HREG(HCODEC_VLC_MB_INFO);
+}
+
+u32 amlvenc_hcodec_qdct_status(void)
+{
+	return READ_HREG(HCODEC_QDCT_STATUS_CTRL);
+}
+
+u32 amlvenc_hcodec_vlc_total_bytes(void)
+{
+	return READ_HREG(HCODEC_VLC_TOTAL_BYTES);
+}
+
+u32 amlvenc_hcodec_vlc_status(void)
+{
+	return READ_HREG(HCODEC_VLC_STATUS_CTRL);
+}
+
+u32 amlvenc_hcodec_me_status(void)
+{
+	return READ_HREG(HCODEC_ME_STATUS);
+}
+
+u32 amlvenc_hcodec_mpc_risc(void)
+{
+	return READ_HREG(HCODEC_MPC_E);
+}
+
+u32 amlvenc_hcodec_debug(void)
+{
+	return READ_HREG(DEBUG_REG);
+}
+
+void amlvenc_dos_sw_reset1(u32 bits)
+{
+	READ_VREG(DOS_SW_RESET1);
+	READ_VREG(DOS_SW_RESET1);
+	READ_VREG(DOS_SW_RESET1);
+	WRITE_VREG(DOS_SW_RESET1, bits);
+	WRITE_VREG(DOS_SW_RESET1, 0);
+	READ_VREG(DOS_SW_RESET1);
+	READ_VREG(DOS_SW_RESET1);
+	READ_VREG(DOS_SW_RESET1);
+}
+
+/* M8: 2550/10 = 255M GX: 2000/10 = 200M */
+#define HDEC_L0()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
+			 (2 << 25) | (1 << 16) | (1 << 24) | \
+			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
+/* M8: 2550/8 = 319M GX: 2000/8 = 250M */
+#define HDEC_L1()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
+			 (0 << 25) | (1 << 16) | (1 << 24) | \
+			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
+/* M8: 2550/7 = 364M GX: 2000/7 = 285M */
+#define HDEC_L2()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
+			 (3 << 25) | (0 << 16) | (1 << 24) | \
+			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
+/* M8: 2550/6 = 425M GX: 2000/6 = 333M */
+#define HDEC_L3()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
+			 (1 << 25) | (1 << 16) | (1 << 24) | \
+			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
+/* M8: 2550/5 = 510M GX: 2000/5 = 400M */
+#define HDEC_L4()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
+			 (2 << 25) | (0 << 16) | (1 << 24) | \
+			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
+/* M8: 2550/4 = 638M GX: 2000/4 = 500M */
+#define HDEC_L5()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
+			 (0 << 25) | (0 << 16) | (1 << 24) | \
+			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
+/* M8: 2550/3 = 850M GX: 2000/3 = 667M */
+#define HDEC_L6()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
+			 (1 << 25) | (0 << 16) | (1 << 24) | \
+			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
+
+void amlvenc_dos_hcodec_enable(u32 clock_level) {
+
+	/* Enable Dos internal clock gating */
+	if ((get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T3) ||
+		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T5M) ||
+		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T3X)) {
+		WRITE_VREG_BITS(DOS_GCLK_EN0, 0x7fff, 12, 15);
+		/*
+		 * WRITE_VREG(DOS_GCLK_EN0, 0xffffffff);
+		*/
+	} else {
+		if (clock_level == 0)
+			HDEC_L0();
+		else if (clock_level == 1)
+			HDEC_L1();
+		else if (clock_level == 2)
+			HDEC_L2();
+		else if (clock_level == 3)
+			HDEC_L3();
+		else if (clock_level == 4)
+			HDEC_L4();
+		else if (clock_level == 5)
+			HDEC_L5();
+		else if (clock_level == 6)
+			HDEC_L6();
+
+		WRITE_VREG_BITS(DOS_GCLK_EN0, 0x7fff, 12, 15);
+	}
+
+	/* Powerup HCODEC memories */
+	WRITE_VREG(DOS_MEM_PD_HCODEC, 0x0);
+}
+
+void amlvenc_dos_hcodec_disable(void) {
+	/* power off HCODEC memories */
+	WRITE_VREG(DOS_MEM_PD_HCODEC, 0xffffffffUL);
+
+	/* disable HCODEC clock */
+	if ((get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T3) ||
+		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T5M) ||
+		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T3X)) {
+		WRITE_VREG_BITS(DOS_GCLK_EN0, 0, 12, 15);
+	} else {
+		WRITE_VREG_BITS(DOS_GCLK_EN0, 0, 12, 15);
+		WRITE_HHI_REG_BITS(HHI_VDEC_CLK_CNTL,  0, 24, 1);
+	}
+}
+
 
 
 

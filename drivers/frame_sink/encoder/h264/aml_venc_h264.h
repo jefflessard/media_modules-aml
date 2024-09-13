@@ -19,10 +19,10 @@
 #ifndef __AVC_ENCODER_HW_OPS_H__
 #define __AVC_ENCODER_HW_OPS_H__
 
-
+#ifdef CONFIG_AMLOGIC_MEDIA_MODULE
 #define H264_ENC_CBR
 #define MULTI_SLICE_MC
-
+#endif
 
 #define IE_PIPELINE_BLOCK_SHIFT 0
 #define IE_PIPELINE_BLOCK_MASK  0x1f
@@ -37,61 +37,6 @@
 #define CBR_LONG_THRESH 4
 #endif
 
-/********************************************
- *  AV Scratch Register Re-Define
- ****************************************** *
- */
-#define ENCODER_STATUS            HCODEC_HENC_SCRATCH_0
-#define MEM_OFFSET_REG            HCODEC_HENC_SCRATCH_1
-#define DEBUG_REG                 HCODEC_HENC_SCRATCH_2
-#define IDR_PIC_ID                HCODEC_HENC_SCRATCH_5
-#define FRAME_NUMBER              HCODEC_HENC_SCRATCH_6
-#define PIC_ORDER_CNT_LSB         HCODEC_HENC_SCRATCH_7
-#define LOG2_MAX_PIC_ORDER_CNT_LSB  HCODEC_HENC_SCRATCH_8
-#define LOG2_MAX_FRAME_NUM          HCODEC_HENC_SCRATCH_9
-#define ANC0_BUFFER_ID              HCODEC_HENC_SCRATCH_A
-#define QPPICTURE                   HCODEC_HENC_SCRATCH_B
-
-#define IE_ME_MB_TYPE               HCODEC_HENC_SCRATCH_D
-
-/* bit 0-4, IE_PIPELINE_BLOCK
- * bit 5    me half pixel in m8
- *		disable i4x4 in gxbb
- * bit 6    me step2 sub pixel in m8
- *		disable i16x16 in gxbb
- */
-#define IE_ME_MODE                  HCODEC_HENC_SCRATCH_E
-#define IE_REF_SEL                  HCODEC_HENC_SCRATCH_F
-
-/* For GX */
-#define INFO_DUMP_START_ADDR      HCODEC_HENC_SCRATCH_I
-
-/* [31:0] NUM_ROWS_PER_SLICE_P */
-/* [15:0] NUM_ROWS_PER_SLICE_I */
-#define FIXED_SLICE_CFG             HCODEC_HENC_SCRATCH_L
-
-/* for SVC */
-#define H264_ENC_SVC_PIC_TYPE      HCODEC_HENC_SCRATCH_K
-
-
-/* For CBR */
-#define H264_ENC_CBR_TABLE_ADDR   HCODEC_HENC_SCRATCH_3
-#define H264_ENC_CBR_MB_SIZE_ADDR      HCODEC_HENC_SCRATCH_4
-/* Bytes(Float) * 256 */
-#define H264_ENC_CBR_CTL          HCODEC_HENC_SCRATCH_G
-/* [31:28] : init qp table idx */
-/* [27:24] : short_term adjust shift */
-/* [23:16] : Long_term MB_Number between adjust, */
-/* [15:0] Long_term adjust threshold(Bytes) */
-#define H264_ENC_CBR_TARGET_SIZE  HCODEC_HENC_SCRATCH_H
-/* Bytes(Float) * 256 */
-#define H264_ENC_CBR_PREV_BYTES   HCODEC_HENC_SCRATCH_J
-#define H264_ENC_CBR_REGION_SIZE   HCODEC_HENC_SCRATCH_J
-
-/* define for PIC  header */
-#define ENC_SLC_REF 0x8410
-#define ENC_SLC_NON_REF 0x8010
-
 /* me weight offset should not very small, it used by v1 me module. */
 /* the min real sad for me is 16 by hardware. */
 #define ME_WEIGHT_OFFSET 0x520
@@ -102,7 +47,7 @@
 /* --------------------------------------------------- */
 /* ENCODER_STATUS define */
 /* --------------------------------------------------- */
-enum amlvenc_hcodec_status {
+enum amlvenc_hcodec_encoder_status {
     ENCODER_IDLE = 0,
     ENCODER_SEQUENCE = 1,
     ENCODER_PICTURE = 2,
@@ -243,7 +188,7 @@ struct amlvenc_h264_snr_params {
 };
 
 /**
- * struct amlvenc_h264_init_params - Parameters for initializing H.264 encoder
+ * struct amlvenc_h264_configure_encoder_params - Parameters for initializing H.264 encoder
  * @idr: IDR frame flag
  * @quant: Quantization parameter
  * @qp_mode: Quantization parameter mode
@@ -264,7 +209,7 @@ struct amlvenc_h264_snr_params {
  * @me_params: Motion estimation parameters
  * @intra_deblock_params: Intra prediction and deblocking parameters
  */
-struct amlvenc_h264_init_params {
+struct amlvenc_h264_configure_encoder_params {
     bool idr;
     u32 quant;
     u32 qp_mode;
@@ -305,15 +250,7 @@ extern const struct amlvenc_h264_me_params amlvenc_h264_me_defaults;
 extern const struct amlvenc_h264_snr_params amlvenc_h264_snr_defaults;
 extern const struct amlvenc_h264_tnr_params amlvenc_h264_tnr_defaults;
 
-/**
- * amlvenc_h264_init_qtable - Initialize quantization tables for H.264 encoding
- * @p: Pointer to the quantization table parameters
- */
-void amlvenc_h264_init_qtable(const struct amlvenc_h264_qtable_params *p);
 
-/**
- * amlvenc_h264_init_me - Initialize motion estimation parameters for H.264 encoding
- */
 /**
  * amlvenc_h264_init_me - Initialize motion estimation parameters for H.264 encoding
  * @p: Pointer to the motion estimation parameters
@@ -321,10 +258,16 @@ void amlvenc_h264_init_qtable(const struct amlvenc_h264_qtable_params *p);
 void amlvenc_h264_init_me(struct amlvenc_h264_me_params *p);
 
 /**
- * amlvenc_h264_init_output_stream_buffer - Initialize output stream buffer for H.264 encoding
- * @p: Pointer to the output buffer parameters
+ * amlvenc_h264_init_encoder - Initialize H.264 encoder parameters
+ * @p: Pointer to the encoder initialization parameters
  */
-void amlvenc_h264_init_output_stream_buffer(u32 bitstreamStart, u32 bitstreamEnd);
+void amlvenc_h264_init_encoder(const struct amlvenc_h264_init_encoder_params *p);
+
+/**
+ * amlvenc_h264_init_firmware_assist_buffer - Initialize firmware assist buffer
+ * @assist_buffer_offset: Offset for the assist buffer
+ */
+void amlvenc_h264_init_firmware_assist_buffer(u32 assist_buffer_offset);
 
 /**
  * amlvenc_h264_init_input_dct_buffer - Initialize input DCT buffer for H.264 encoding
@@ -339,22 +282,22 @@ void amlvenc_h264_init_input_dct_buffer(u32 dct_buff_start_addr, u32 dct_buff_en
 void amlvenc_h264_init_input_reference_buffer(int canvas);
 
 /**
- * amlvenc_h264_init_firmware_assist_buffer - Initialize firmware assist buffer
- * @assist_buffer_offset: Offset for the assist buffer
- */
-void amlvenc_h264_init_firmware_assist_buffer(u32 assist_buffer_offset);
-
-/**
  * amlvenc_h264_init_dblk_buffer - Initialize deblocking buffer
  * @canvas: Canvas number for the deblocking buffer
  */
 void amlvenc_h264_init_dblk_buffer(int canvas);
 
 /**
- * amlvenc_h264_init_encoder - Initialize H.264 encoder parameters
- * @p: Pointer to the encoder initialization parameters
+ * amlvenc_h264_init_output_stream_buffer - Initialize output stream buffer for H.264 encoding
+ * @p: Pointer to the output buffer parameters
  */
-void amlvenc_h264_init_encoder(const struct amlvenc_h264_init_encoder_params *p);
+void amlvenc_h264_init_output_stream_buffer(u32 bitstreamStart, u32 bitstreamEnd);
+
+/**
+ * amlvenc_h264_init_qtable - Initialize quantization tables for H.264 encoding
+ * @p: Pointer to the quantization table parameters
+ */
+void amlvenc_h264_init_qtable(const struct amlvenc_h264_qtable_params *p);
 
 /**
  * amlvenc_h264_configure_ie_me - Configure IE and ME parameters for H.264 encoding
@@ -362,11 +305,9 @@ void amlvenc_h264_init_encoder(const struct amlvenc_h264_init_encoder_params *p)
  */
 void amlvenc_h264_configure_ie_me(enum amlvenc_henc_mb_type ie_me_mb_type);
 
-/**
- * amlvenc_h264_configure_slice - Configure fixed slice parameters for H.264 encoding
- * @p: Pointer to the fixed slice configuration parameters
- */
-void amlvenc_h264_configure_slice(u32 fixed_slice_cfg, u32 rows_per_slice, u32 encoder_height);
+void amlvenc_h264_configure_fixed_slice(u32 fixed_slice_cfg, u32 rows_per_slice, u32 encoder_height);
+
+void amlvenc_h264_configure_svc_pic(bool is_slc_ref);
 
 /**
  * amlvenc_h264_configure_mdfin - Configure MDFIN parameters for H.264 encoding
@@ -375,34 +316,44 @@ void amlvenc_h264_configure_slice(u32 fixed_slice_cfg, u32 rows_per_slice, u32 e
 void amlvenc_h264_configure_mdfin(struct amlvenc_h264_mdfin_params *p);
 
 /**
- * amlvenc_h264_init - Initialize H.264 encoder
+ * amlvenc_h264_configure_encoder - Initialize H.264 encoder
  * @p: Pointer to the initialization parameters
  *
  * This function initializes the H.264 encoder with the provided parameters.
  * It sets up various encoder settings, including picture dimensions, quantization
  * parameters, and configures hardware registers for encoding.
  */
-void amlvenc_h264_init(const struct amlvenc_h264_init_params *p);
+void amlvenc_h264_configure_encoder(const struct amlvenc_h264_configure_encoder_params *p);
 
 /**
- * amlvenc_h264_init_me_parameters - Initialize motion estimation parameters
+ * amlvenc_h264_configure_me - Initialize motion estimation parameters
  * @p: Pointer to the motion estimation parameters
  *
  * This function writes the motion estimation parameters to the hardware registers.
  */
-void amlvenc_h264_init_me_parameters(const struct amlvenc_h264_me_params *p);
+void amlvenc_h264_configure_me(const struct amlvenc_h264_me_params *p);
 
-void amlvenc_dos_sw_reset(u32 bits);
+void amlvenc_hcodec_canvas_config(u32 index, ulong addr, u32 width, u32 height, u32 wrap, u32 blkmode);
 
 void amlvenc_hcodec_start(void);
 void amlvenc_hcodec_stop(void);
 void amlvenc_hcodec_assist_enable(void);
 void amlvenc_hcodec_dma_load_firmware(dma_addr_t dma_handle, size_t size);
 bool amlvenc_hcodec_dma_completed(void);
-enum amlvenc_hcodec_status amlvenc_hcodec_status(void);
-void amlvenc_hcodec_clear_status(void);
-void amlvenc_hcodec_set_status(enum amlvenc_hcodec_status status);
-void amlvenc_hcodec_canvas_config(u32 index, ulong addr, u32 width, u32 height, u32 wrap, u32 blkmode);
+enum amlvenc_hcodec_encoder_status amlvenc_hcodec_encoder_status(void);
+void amlvenc_hcodec_clear_encoder_status(void);
+void amlvenc_hcodec_set_encoder_status(enum amlvenc_hcodec_encoder_status status);
+u32 amlvenc_hcodec_mb_info(void);
+u32 amlvenc_hcodec_qdct_status(void);
+u32 amlvenc_hcodec_vlc_total_bytes(void);
+u32 amlvenc_hcodec_vlc_status(void);
+u32 amlvenc_hcodec_me_status(void);
+u32 amlvenc_hcodec_mpc_risc(void);
+u32 amlvenc_hcodec_debug(void);
 
+
+void amlvenc_dos_sw_reset1(u32 bits);
+void amlvenc_dos_hcodec_enable(u32 clock_level);
+void amlvenc_dos_hcodec_disable(void);
 
 #endif /* __AVC_ENCODER_HW_OPS_H__ */

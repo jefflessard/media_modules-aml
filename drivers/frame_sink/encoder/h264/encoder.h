@@ -43,60 +43,6 @@
 
 #define H264_ENC_SVC
 
-/* M8: 2550/10 = 255M GX: 2000/10 = 200M */
-#define HDEC_L0()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
-			 (2 << 25) | (1 << 16) | (1 << 24) | \
-			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
-/* M8: 2550/8 = 319M GX: 2000/8 = 250M */
-#define HDEC_L1()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
-			 (0 << 25) | (1 << 16) | (1 << 24) | \
-			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
-/* M8: 2550/7 = 364M GX: 2000/7 = 285M */
-#define HDEC_L2()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
-			 (3 << 25) | (0 << 16) | (1 << 24) | \
-			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
-/* M8: 2550/6 = 425M GX: 2000/6 = 333M */
-#define HDEC_L3()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
-			 (1 << 25) | (1 << 16) | (1 << 24) | \
-			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
-/* M8: 2550/5 = 510M GX: 2000/5 = 400M */
-#define HDEC_L4()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
-			 (2 << 25) | (0 << 16) | (1 << 24) | \
-			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
-/* M8: 2550/4 = 638M GX: 2000/4 = 500M */
-#define HDEC_L5()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
-			 (0 << 25) | (0 << 16) | (1 << 24) | \
-			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
-/* M8: 2550/3 = 850M GX: 2000/3 = 667M */
-#define HDEC_L6()   WRITE_HHI_REG(HHI_VDEC_CLK_CNTL, \
-			 (1 << 25) | (0 << 16) | (1 << 24) | \
-			 (0xffff & READ_HHI_REG(HHI_VDEC_CLK_CNTL)))
-
-#define hvdec_clock_enable(level) \
-	do { \
-		if (level == 0)  \
-			HDEC_L0(); \
-		else if (level == 1)  \
-			HDEC_L1(); \
-		else if (level == 2)  \
-			HDEC_L2(); \
-		else if (level == 3)  \
-			HDEC_L3(); \
-		else if (level == 4)  \
-			HDEC_L4(); \
-		else if (level == 5)  \
-			HDEC_L5(); \
-		else if (level == 6)  \
-			HDEC_L6(); \
-		WRITE_VREG_BITS(DOS_GCLK_EN0, 0x7fff, 12, 15); \
-	} while (0)
-
-#define hvdec_clock_disable() \
-	do { \
-		WRITE_VREG_BITS(DOS_GCLK_EN0, 0, 12, 15); \
-		WRITE_HHI_REG_BITS(HHI_VDEC_CLK_CNTL,  0, 24, 1); \
-	} while (0)
-
 #define LOG_ALL 0
 #define LOG_INFO 1
 #define LOG_DEBUG 2

@@ -36,38 +36,38 @@
 //#include <asm/segment.h>
 #include <asm/uaccess.h>
 #include <linux/buffer_head.h>
-#include <linux/amlogic/media/frame_sync/ptsserv.h>
-#include <linux/amlogic/media/utils/amstream.h>
-#include <linux/amlogic/media/canvas/canvas.h>
-#include <linux/amlogic/media/canvas/canvas_mgr.h>
-#include <linux/amlogic/media/codec_mm/codec_mm.h>
+// #include <linux/amlogic/media/frame_sync/ptsserv.h>
+// #include <linux/amlogic/media/utils/amstream.h>
+// #include <linux/amlogic/media/canvas/canvas.h>
+// #include <linux/amlogic/media/canvas/canvas_mgr.h>
+// #include <linux/amlogic/media/codec_mm/codec_mm.h>
 #include "../../../frame_provider/decoder/utils/vdec_canvas_utils.h"
-#include <linux/amlogic/media/utils/vdec_reg.h>
-#include "../../../frame_provider/decoder/utils/vdec.h"
+//#include <linux/amlogic/media/utils/vdec_reg.h>
+//#include "../../../frame_provider/decoder/utils/vdec.h"
 #include <linux/delay.h>
 #include <linux/poll.h>
 #include <linux/of.h>
 #include <linux/of_fdt.h>
 #include <linux/kthread.h>
 #include <linux/sched/rt.h>
-#include <linux/amlogic/media/utils/amports_config.h>
+// #include <linux/amlogic/media/utils/amports_config.h>
 #include "encoder.h"
 #include "../../../frame_provider/decoder/utils/amvdec.h"
 #include "../../../common/chips/decoder_cpu_ver_info.h"
-#include "../../../frame_provider/decoder/utils/vdec.h"
+//#include "../../../frame_provider/decoder/utils/vdec.h"
 #include "../../../frame_provider/decoder/utils/vdec_power_ctrl.h"
 
-#include <linux/amlogic/media/utils/vdec_reg.h>
+//#include <linux/amlogic/media/utils/vdec_reg.h>
 //#include <linux/amlogic/power_ctrl.h>
 #include <dt-bindings/power/sc2-pd.h>
 #include <dt-bindings/power/t3-pd.h>
 #include <linux/amlogic/power_domain.h>
 //#include <linux/amlogic/power_ctrl.h>
 
-#include <linux/amlogic/media/utils/amlog.h>
-#include "../../../stream_input/amports/amports_priv.h"
+// #include <linux/amlogic/media/utils/amlog.h>
+// #include "../../../stream_input/amports/amports_priv.h"
 #include "../../../frame_provider/decoder/utils/firmware.h"
-#include <linux/amlogic/media/registers/register.h>
+// #include <linux/amlogic/media/registers/register.h>
 #include <linux/of_reserved_mem.h>
 #include <linux/version.h>
 
@@ -1281,7 +1281,7 @@ static void avc_prot_init(struct encode_wq_s *wq,
 		.quant_tbl_me = wq->quant_tbl_me,
 	};
 
-	struct amlvenc_h264_init_params p = {
+	struct amlvenc_h264_configure_encoder_params p = {
 		.idr = IDR,
 		.quant = quant,
 		.qp_mode = qp_mode,
@@ -1299,9 +1299,10 @@ static void avc_prot_init(struct encode_wq_s *wq,
 		.cbr_block_h = wq->cbr_info.block_h,
 		.dump_ddr_start_addr = wq->mem.dump_info_ddr_start_addr,
 		.qtable = &qtable,
+		.me = &me,
 	};
 
-	amlvenc_h264_init(&p);
+	amlvenc_h264_configure_encoder(&p);
 }
 
 void amvenc_reset(void)
@@ -1310,7 +1311,7 @@ void amvenc_reset(void)
 			use_reset_control) {
 		hcodec_hw_reset();
 	} else {
-		amlvenc_dos_sw_reset(
+		amlvenc_dos_sw_reset1(
 			(1 << 2)  | (1 << 6)  |
 			(1 << 7)  | (1 << 8)  |
 			(1 << 14) | (1 << 16) |
@@ -1325,7 +1326,7 @@ void amvenc_start(void)
 			use_reset_control) {
 		hcodec_hw_reset();
 	} else {
-		amlvenc_dos_sw_reset(
+		amlvenc_dos_sw_reset1(
 			(1 << 12) | (1 << 11)
 		);
 	}
@@ -1339,7 +1340,7 @@ void amvenc_stop(void)
 
 	amlvenc_hcodec_stop();
 
-	while (READ_HREG(HCODEC_IMEM_DMA_CTRL) & 0x8000) {
+	while (!amlvenc_hcodec_dma_completed()) {
 		if (time_after(jiffies, timeout))
 			break;
 	}
@@ -1348,7 +1349,7 @@ void amvenc_stop(void)
 			use_reset_control) {
 		hcodec_hw_reset();
 	} else {
-		amlvenc_dos_sw_reset(
+		amlvenc_dos_sw_reset1(
 			(1 << 12) | (1 << 11) |
 			(1 << 2)  | (1 << 6)  |
 			(1 << 7)  | (1 << 8)  |
@@ -1547,19 +1548,8 @@ static s32 avc_poweron(u32 clock)
 		spin_unlock_irqrestore(&lock, flags);
 	}
 	spin_lock_irqsave(&lock, flags);
-	amlvenc_dos_sw_reset(0xffffffff);
-	/* Enable Dos internal clock gating */
-	if ((get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T3) || \
-		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T5M) || \
-		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T3X)) {
-		WRITE_VREG_BITS(DOS_GCLK_EN0, 0x7fff, 12, 15);
-		/*
-		 * WRITE_VREG(DOS_GCLK_EN0, 0xffffffff);
-		*/
-	} else
-		hvdec_clock_enable(clock);
-	/* Powerup HCODEC memories */
-	WRITE_VREG(DOS_MEM_PD_HCODEC, 0x0);
+	amlvenc_dos_sw_reset1(0xffffffff);
+	amlvenc_dos_hcodec_enable(clock);
 
 	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_SC2) {
 	} else  {
@@ -1611,16 +1601,8 @@ static s32 avc_poweroff(void)
 		spin_unlock_irqrestore(&lock, flags);
 	}
 	spin_lock_irqsave(&lock, flags);
-	/* power off HCODEC memories */
-	WRITE_VREG(DOS_MEM_PD_HCODEC, 0xffffffffUL);
 
-	/* disable HCODEC clock */
-	if ((get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T3) || \
-		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T5M) || \
-		(get_cpu_major_id() == AM_MESON_CPU_MAJOR_ID_T3X)) {
-		WRITE_VREG_BITS(DOS_GCLK_EN0, 0, 12, 15);
-	} else
-		hvdec_clock_disable();
+	amlvenc_dos_hcodec_disable();
 
 	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_SC2) {
 
@@ -1649,7 +1631,7 @@ static s32 reload_mc(struct encode_wq_s *wq)
 	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_SC2 && use_reset_control) {
 		hcodec_hw_reset();
 	} else {
-		amlvenc_dos_sw_reset(0xffffffff);
+		amlvenc_dos_sw_reset1(0xffffffff);
 	}
 
 	udelay(10);
@@ -1683,7 +1665,7 @@ static irqreturn_t enc_isr(s32 irq_number, void *para)
 
 	enc_pr(LOG_INFO, "*****ENC_ISR*****\n");
 
-	manager->encode_hw_status  = amlvenc_hcodec_status();
+	manager->encode_hw_status  = amlvenc_hcodec_encoder_status();
 	if ((manager->encode_hw_status == ENCODER_IDR_DONE)
 		|| (manager->encode_hw_status == ENCODER_NON_IDR_DONE)
 		|| (manager->encode_hw_status == ENCODER_SEQUENCE_DONE)
@@ -1985,20 +1967,20 @@ void amvenc_avc_start_cmd(struct encode_wq_s *wq,
 
 		if (wq->pic.enable_svc && wq->pic.non_ref_cnt) {
 			enc_pr(LOG_INFO,
-				"PIC is NON REF cmd %d cnt %d value 0x%x\n",
+				"PIC is NON REF cmd %d cnt %d value %s\n",
 				request->cmd, wq->pic.non_ref_cnt,
-				ENC_SLC_NON_REF);
-			WRITE_HREG(H264_ENC_SVC_PIC_TYPE, ENC_SLC_NON_REF);
+				"ENC_SLC_NON_REF");
+			amlvenc_h264_configure_svc_pic(false);
 		} else {
 			enc_pr(LOG_INFO,
-				"PIC is REF cmd %d cnt %d val 0x%x\n",
+				"PIC is REF cmd %d cnt %d val %s\n",
 				request->cmd, wq->pic.non_ref_cnt,
-				ENC_SLC_REF);
-			WRITE_HREG(H264_ENC_SVC_PIC_TYPE, ENC_SLC_REF);
+				"ENC_SLC_REF");
+			amlvenc_h264_configure_svc_pic(true);			
 		}
 #else
 		/* if FW defined but not defined SVC in driver here*/
-		WRITE_HREG(H264_ENC_SVC_PIC_TYPE, ENC_SLC_REF);
+		amlvenc_h264_configure_svc_pic(true);
 #endif
 		amlvenc_h264_init_dblk_buffer(wq->mem.dblk_buf_canvas);
 		amlvenc_h264_init_input_reference_buffer(wq->mem.ref_buf_canvas);
@@ -2018,11 +2000,11 @@ void amvenc_avc_start_cmd(struct encode_wq_s *wq,
 		ie_me_mb_type = 0;
 
 	amlvenc_h264_configure_ie_me(ie_me_mb_type);
-	amlvenc_h264_configure_slice(fixed_slice_cfg, wq->pic.rows_per_slice, wq->pic.encoder_height);
+	amlvenc_h264_configure_fixed_slice(fixed_slice_cfg, wq->pic.rows_per_slice, wq->pic.encoder_height);
 
 	encode_manager.encode_hw_status = request->cmd;
 	wq->hw_status = request->cmd;
-	amlvenc_hcodec_set_status(request->cmd);
+	amlvenc_hcodec_set_encoder_status(request->cmd);
 	if ((request->cmd == ENCODER_IDR)
 		|| (request->cmd == ENCODER_NON_IDR)
 		|| (request->cmd == ENCODER_SEQUENCE)
@@ -2130,9 +2112,9 @@ s32 amvenc_avc_start(struct encode_wq_s *wq, u32 clock)
 
 	amlvenc_h264_configure_ie_me(0);
 
-	amlvenc_hcodec_clear_status();
+	amlvenc_hcodec_clear_encoder_status();
 
-	amlvenc_h264_configure_slice(fixed_slice_cfg, wq->pic.rows_per_slice, wq->pic.encoder_height);
+	amlvenc_h264_configure_fixed_slice(fixed_slice_cfg, wq->pic.rows_per_slice, wq->pic.encoder_height);
 
 	amvenc_start();
 
@@ -2645,14 +2627,14 @@ Again:
 
 	if ((request->cmd == ENCODER_SEQUENCE) &&
 	    (manager->encode_hw_status == ENCODER_SEQUENCE_DONE)) {
-		wq->sps_size = READ_HREG(HCODEC_VLC_TOTAL_BYTES);
+		wq->sps_size = amlvenc_hcodec_vlc_total_bytes();
 		wq->hw_status = manager->encode_hw_status;
 		request->cmd = ENCODER_PICTURE;
 		goto Again;
 	} else if ((request->cmd == ENCODER_PICTURE) &&
 		   (manager->encode_hw_status == ENCODER_PICTURE_DONE)) {
 		wq->pps_size =
-			READ_HREG(HCODEC_VLC_TOTAL_BYTES) - wq->sps_size;
+			amlvenc_hcodec_vlc_total_bytes() - wq->sps_size;
 		wq->hw_status = manager->encode_hw_status;
 		if (request->flush_flag & AMVENC_FLUSH_FLAG_OUTPUT) {
 			buf_start = getbuffer(wq, ENCODER_BUFFER_OUTPUT);
@@ -2665,7 +2647,7 @@ Again:
 
 		if ((manager->encode_hw_status == ENCODER_IDR_DONE) ||
 		    (manager->encode_hw_status == ENCODER_NON_IDR_DONE)) {
-			wq->output_size = READ_HREG(HCODEC_VLC_TOTAL_BYTES);
+			wq->output_size = amlvenc_hcodec_vlc_total_bytes();
 
 			if (request->flush_flag & AMVENC_FLUSH_FLAG_OUTPUT) {
 				buf_start = getbuffer(wq, ENCODER_BUFFER_OUTPUT);
@@ -2700,15 +2682,15 @@ Again:
 				wq->pic.encoder_height, (void *)wq);
 			enc_pr(LOG_DEBUG,
 				"mb info: 0x%x, encode status: 0x%x, dct status: 0x%x ",
-				READ_HREG(HCODEC_VLC_MB_INFO),
-				amlvenc_hcodec_status(),
-				READ_HREG(HCODEC_QDCT_STATUS_CTRL));
+				amlvenc_hcodec_mb_info(),
+				amlvenc_hcodec_encoder_status(),
+				amlvenc_hcodec_qdct_status());
 			enc_pr(LOG_DEBUG,
 				"vlc status: 0x%x, me status: 0x%x, risc pc:0x%x, debug:0x%x\n",
-				READ_HREG(HCODEC_VLC_STATUS_CTRL),
-				READ_HREG(HCODEC_ME_STATUS),
-				READ_HREG(HCODEC_MPC_E),
-				READ_HREG(DEBUG_REG));
+				amlvenc_hcodec_vlc_status(),
+				amlvenc_hcodec_me_status(),
+				amlvenc_hcodec_mpc_risc(),
+				amlvenc_hcodec_debug());
 			amvenc_avc_light_reset(wq, 30);
 		}
 
