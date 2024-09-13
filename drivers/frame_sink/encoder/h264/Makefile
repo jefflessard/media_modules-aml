@@ -2,7 +2,7 @@ MODULE_NAME = encoder
 ifeq (${VERSION},5)
 ifeq (${PATCHLEVEL},15)
 	MODULE_NAME = amlogic-encoder
-	$(MODULE_NAME)-objs += encoder.o aml_venc_h264.o
+	$(MODULE_NAME)-objs += aml_venc_h264.o encoder.o
 endif
 endif
 obj-m = $(MODULE_NAME).o

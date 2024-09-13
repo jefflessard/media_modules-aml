@@ -76,6 +76,8 @@
 #include <linux/sched/signal.h>
 #endif
 
+#define MORE_MODULE_PARAM
+
 #include "aml_venc_h264.h"
 
 #ifdef CONFIG_AM_JPEG_ENCODER
@@ -117,7 +119,8 @@ static struct encode_manager_s encode_manager;
 
 /* #define ENABLE_IGNORE_FUNCTION */
 
-static u32 ie_me_mb_type;
+static u32 fixed_slice_cfg;
+static enum amlvenc_henc_mb_type ie_me_mb_type;
 static u32 ie_me_mode;
 static u32 ie_pipeline_block = 3;
 static u32 ie_cur_ref_sel;
@@ -147,84 +150,109 @@ struct hcodec_clks {
 static struct hcodec_clks s_hcodec_clks;
 struct reset_control *hcodec_rst;
 
-/* [31:0] NUM_ROWS_PER_SLICE_P */
-/* [15:0] NUM_ROWS_PER_SLICE_I */
-static u32 fixed_slice_cfg;
+
+static struct amlvenc_h264_me_params me = {
+	.me_mv_merge_ctl =
+		(0x1 << 31)  |  /* [31] me_merge_mv_en_16 */
+		(0x1 << 30)  |  /* [30] me_merge_small_mv_en_16 */
+		(0x1 << 29)  |  /* [29] me_merge_flex_en_16 */
+		(0x1 << 28)  |  /* [28] me_merge_sad_en_16 */
+		(0x1 << 27)  |  /* [27] me_merge_mv_en_8 */
+		(0x1 << 26)  |  /* [26] me_merge_small_mv_en_8 */
+		(0x1 << 25)  |  /* [25] me_merge_flex_en_8 */
+		(0x1 << 24)  |  /* [24] me_merge_sad_en_8 */
+		/* [23:18] me_merge_mv_diff_16 - MV diff <= n pixel can be merged */
+		(0x12 << 18) |
+		/* [17:12] me_merge_mv_diff_8 - MV diff <= n pixel can be merged */
+		(0x2b << 12) |
+		/* [11:0] me_merge_min_sad - SAD >= 0x180 can be merged with other MV */
+		(0x80 << 0),
+		/* ( 0x4 << 18)  |
+		* // [23:18] me_merge_mv_diff_16 - MV diff <= n pixel can be merged
+		*/
+		/* ( 0x3f << 12)  |
+		* // [17:12] me_merge_mv_diff_8 - MV diff <= n pixel can be merged
+		*/
+		/* ( 0xc0 << 0),
+		* // [11:0] me_merge_min_sad - SAD >= 0x180 can be merged with other MV
+		*/
+
+	.me_mv_weight_01 = (0x40 << 24) | (0x30 << 16) | (0x20 << 8) | 0x30,
+	.me_mv_weight_23 = (0x40 << 8) | 0x30,
+	.me_sad_range_inc = 0x03030303,
+	.me_step0_close_mv = 0x003ffc21,
+	.me_f_skip_sad = 0,
+	.me_f_skip_weight = 0,
+	.me_sad_enough_01 = 0,/* 0x00018010, */
+	.me_sad_enough_23 = 0,/* 0x00000020, */
+};
+
+/* y tnr */
+static struct amlvenc_h264_tnr_params y_tnr = {
+	.mc_en = 1,
+	.txt_mode = 0,
+	.mot_sad_margin = 1,
+	.mot_cortxt_rate = 1,
+	.mot_distxt_ofst = 5,
+	.mot_distxt_rate = 4,
+	.mot_dismot_ofst = 4,
+	.mot_frcsad_lock = 8,
+	.mot2alp_frc_gain = 10,
+	.mot2alp_nrm_gain = 216,
+	.mot2alp_dis_gain = 128,
+	.mot2alp_dis_ofst = 32,
+	.alpha_min = 32,
+	.alpha_max = 63,
+	.deghost_os = 0,
+};
+
+/* c tnr */
+static struct amlvenc_h264_tnr_params c_tnr = {
+	.mc_en = 1,
+	.txt_mode = 0,
+	.mot_sad_margin = 1,
+	.mot_cortxt_rate = 1,
+	.mot_distxt_ofst = 5,
+	.mot_distxt_rate = 4,
+	.mot_dismot_ofst = 4,
+	.mot_frcsad_lock = 8,
+	.mot2alp_frc_gain = 10,
+	.mot2alp_nrm_gain = 216,
+	.mot2alp_dis_gain = 128,
+	.mot2alp_dis_ofst = 32,
+	.alpha_min = 32,
+	.alpha_max = 63,
+	.deghost_os = 0,
+};
+/* y snr */
+static struct amlvenc_h264_snr_params y_snr = {
+	.err_norm = 1,
+	.gau_bld_core = 1,
+	.gau_bld_ofst = -1,
+	.gau_bld_rate = 48,
+	.gau_alp0_min = 0,
+	.gau_alp0_max = 63,
+	.beta2alp_rate = 16,
+	.beta_min = 0,
+	.beta_max = 63,
+};
+
+/* c snr */
+static struct amlvenc_h264_snr_params c_snr = {
+	.err_norm = 1,
+	.gau_bld_core = 1,
+	.gau_bld_ofst = -1,
+	.gau_bld_rate = 48,
+	.gau_alp0_min = 0,
+	.gau_alp0_max = 63,
+	.beta2alp_rate = 16,
+	.beta_min = 0,
+	.beta_max = 63,
+};
 
 static unsigned int qp_mode;
 
 static DEFINE_SPINLOCK(lock);
-
-static u32 v3_mv_sad[64] = {
-	/* For step0 */
-	0x00000004,
-	0x00010008,
-	0x00020010,
-	0x00030018,
-	0x00040020,
-	0x00050028,
-	0x00060038,
-	0x00070048,
-	0x00080058,
-	0x00090068,
-	0x000a0080,
-	0x000b0098,
-	0x000c00b0,
-	0x000d00c8,
-	0x000e00e8,
-	0x000f0110,
-	/* For step1 */
-	0x00100002,
-	0x00110004,
-	0x00120008,
-	0x0013000c,
-	0x00140010,
-	0x00150014,
-	0x0016001c,
-	0x00170024,
-	0x0018002c,
-	0x00190034,
-	0x001a0044,
-	0x001b0054,
-	0x001c0064,
-	0x001d0074,
-	0x001e0094,
-	0x001f00b4,
-	/* For step2 */
-	0x00200006,
-	0x0021000c,
-	0x0022000c,
-	0x00230018,
-	0x00240018,
-	0x00250018,
-	0x00260018,
-	0x00270030,
-	0x00280030,
-	0x00290030,
-	0x002a0030,
-	0x002b0030,
-	0x002c0030,
-	0x002d0030,
-	0x002e0030,
-	0x002f0050,
-	/* For step2 4x4-8x8 */
-	0x00300001,
-	0x00310002,
-	0x00320002,
-	0x00330004,
-	0x00340004,
-	0x00350004,
-	0x00360004,
-	0x00370006,
-	0x00380006,
-	0x00390006,
-	0x003a0006,
-	0x003b0006,
-	0x003c0006,
-	0x003d0006,
-	0x003e0006,
-	0x003f0006
-};
 
 static struct BuffInfo_s amvenc_buffspec[] = {
 	{
@@ -337,64 +365,11 @@ static int file_write(struct file *file, unsigned long long offset, unsigned cha
 
 static void canvas_config_proxy(u32 index, ulong addr, u32 width, u32 height,
 		   u32 wrap, u32 blkmode) {
-	unsigned long datah_temp, datal_temp;
 
 	if (!is_support_vdec_canvas()) {
 		canvas_config(index, addr, width, height, wrap, blkmode);
 	} else {
-#if 1
-		ulong start_addr = addr >> 3;
-		u32 cav_width = (((width + 31)>>5)<<2);
-		u32 cav_height = height;
-		u32 x_wrap_en = 0;
-		u32 y_wrap_en = 0;
-		u32 blk_mode = 0;//blkmode;
-		u32 cav_endian = 0;
-
-		datal_temp = (start_addr & 0x1fffffff) |
-					((cav_width & 0x7 ) << 29 );
-
-		datah_temp = ((cav_width  >> 3) & 0x1ff) |
-					((cav_height & 0x1fff) <<9 ) |
-					((x_wrap_en & 1) << 22 ) |
-					((y_wrap_en & 1) << 23) |
-					((blk_mode & 0x3) << 24) |
-					( cav_endian << 26);
-
-#else
-		u32 endian = 0;
-		u32 addr_bits_l = ((((addr + 7) >> 3) & CANVAS_ADDR_LMASK) << CAV_WADDR_LBIT);
-		u32 width_l     = ((((width    + 7) >> 3) & CANVAS_WIDTH_LMASK) << CAV_WIDTH_LBIT);
-		u32 width_h     = ((((width    + 7) >> 3) >> CANVAS_WIDTH_LWID) << CAV_WIDTH_HBIT);
-		u32 height_h    = (height & CANVAS_HEIGHT_MASK) << CAV_HEIGHT_HBIT;
-		u32 blkmod_h    = (blkmode & CANVAS_BLKMODE_MASK) << CAV_BLKMODE_HBIT;
-		u32 switch_bits_ctl = (endian & 0xf) << CAV_ENDIAN_HBIT;
-		u32 wrap_h      = (0 << 23);
-		datal_temp = addr_bits_l | width_l;
-		datah_temp = width_h | height_h | wrap_h | blkmod_h | switch_bits_ctl;
-#endif
-		/*
-		if (core == VDEC_1) {
-			WRITE_VREG(MDEC_CAV_CFG0, 0);	//[0]canv_mode, by default is non-canv-mode
-			WRITE_VREG(MDEC_CAV_LUT_DATAL, datal_temp);
-			WRITE_VREG(MDEC_CAV_LUT_DATAH, datah_temp);
-			WRITE_VREG(MDEC_CAV_LUT_ADDR,  index);
-		} else if (core == VDEC_HCODEC) */ {
-			WRITE_HREG(HCODEC_MDEC_CAV_CFG0, 0);	//[0]canv_mode, by default is non-canv-mode
-			WRITE_HREG(HCODEC_MDEC_CAV_LUT_DATAL, datal_temp);
-			WRITE_HREG(HCODEC_MDEC_CAV_LUT_DATAH, datah_temp);
-			WRITE_HREG(HCODEC_MDEC_CAV_LUT_ADDR,  index);
-		}
-
-		/*
-		cav_lut_info_store(index, addr, width, height, wrap, blkmode, 0);
-
-		if (vdec_get_debug() & 0x40000000) {
-			enc_pr(LOG_INFO, "(%s %2d) addr: %lx, width: %d, height: %d, blkm: %d, endian: %d\n",
-				__func__, index, addr, width, height, blkmode, 0);
-			enc_pr(LOG_INFO, "data(h,l): 0x%8lx, 0x%8lx\n", datah_temp, datal_temp);
-	    }
-	    */
+		amlvenc_hcodec_canvas_config(index, addr, width, height, wrap, blkmode);
 	}
 }
 
@@ -1234,12 +1209,24 @@ static s32 set_input_format(struct encode_wq_s *wq,
 #ifdef CONFIG_AMLOGIC_MEDIA_GE2D
 MFDIN:
 #endif
-	if (ret == 0)
-		amlvenc_h264_configure_mdfin(
-			input, iformat,
-			oformat, picsize_x, picsize_y,
-			r2y_en, request->nr_mode, ifmt_extra
-		);
+	if (ret == 0) {
+		struct amlvenc_h264_mdfin_params mdfin = {
+			.input = input,
+			.iformat = iformat,
+			.oformat = oformat,
+			.picsize_x = picsize_x,
+			.picsize_y = picsize_y,
+			.r2y_en = r2y_en,
+			.nr_mode = nr_mode,
+			.nr_mode = request->nr_mode,
+			.ifmt_extra = ifmt_extra,
+			.y_snr = &y_snr,
+			.c_snr = &c_snr,
+			.y_tnr = &y_tnr,
+			.c_tnr = &c_tnr,
+		};
+		amlvenc_h264_configure_mdfin(&mdfin);
+	}
 
 	return ret;
 }
@@ -1288,16 +1275,33 @@ static void avc_prot_init(struct encode_wq_s *wq,
 		me_weight = ME_WEIGHT_OFFSET;
 	}
 
-	amlvenc_h264_init(
-		IDR, quant, qp_mode,
-		wq->pic.encoder_width, wq->pic.encoder_height,
-		i4_weight, i16_weight, me_weight,
-		wq->quant_tbl_i4, wq->quant_tbl_i16, wq->quant_tbl_me,
-		wq->mem.cbr_info_ddr_start_addr, wq->cbr_info.start_tbl_id,
-		wq->cbr_info.short_shift, wq->cbr_info.long_mb_num, wq->cbr_info.long_th,
-		wq->cbr_info.block_w, wq->cbr_info.block_h,
-		v3_mv_sad, wq->mem.dump_info_ddr_start_addr
-	);
+	struct amlvenc_h264_qtable_params qtable = {
+		.quant_tbl_i4 = wq->quant_tbl_i4,
+		.quant_tbl_i16 = wq->quant_tbl_i16,
+		.quant_tbl_me = wq->quant_tbl_me,
+	};
+
+	struct amlvenc_h264_init_params p = {
+		.idr = IDR,
+		.quant = quant,
+		.qp_mode = qp_mode,
+		.encoder_width = wq->pic.encoder_width,
+		.encoder_height = wq->pic.encoder_height,
+		.i4_weight = i4_weight,
+		.i16_weight = i16_weight,
+		.me_weight = me_weight,
+		.cbr_ddr_start_addr = wq->mem.cbr_info_ddr_start_addr,
+		.cbr_start_tbl_id = wq->cbr_info.start_tbl_id,
+		.cbr_short_shift = wq->cbr_info.short_shift,
+		.cbr_long_mb_num = wq->cbr_info.long_mb_num,
+		.cbr_long_th = wq->cbr_info.long_th,
+		.cbr_block_w = wq->cbr_info.block_w,
+		.cbr_block_h = wq->cbr_info.block_h,
+		.dump_ddr_start_addr = wq->mem.dump_info_ddr_start_addr,
+		.qtable = &qtable,
+	};
+
+	amlvenc_h264_init(&p);
 }
 
 void amvenc_reset(void)
@@ -1425,12 +1429,9 @@ s32 amvenc_loadmc(const char *p, struct encode_wq_s *wq)
 
 	timeout = jiffies + HZ;
 
-	WRITE_HREG(HCODEC_IMEM_DMA_ADR, mc_addr_map);
-	WRITE_HREG(HCODEC_IMEM_DMA_COUNT, 0x1000);
-	//WRITE_HREG(HCODEC_IMEM_DMA_CTRL, (0x8000 | (7 << 16)));
-	WRITE_VREG(HCODEC_IMEM_DMA_CTRL, (0x8000 | (0xf << 16)));
+    amlvenc_hcodec_dma_load_firmware(mc_addr_map, MC_SIZE);
 
-	while (READ_HREG(HCODEC_IMEM_DMA_CTRL) & 0x8000) {
+    while (!amlvenc_hcodec_dma_completed()) {
 		if (time_before(jiffies, timeout))
 			schedule();
 		else {
@@ -1653,7 +1654,7 @@ static s32 reload_mc(struct encode_wq_s *wq)
 
 	udelay(10);
 
-	WRITE_HREG(HCODEC_ASSIST_MMC_CTRL1, 0x32);
+	amlvenc_hcodec_assist_enable();
 	enc_pr(LOG_INFO, "reload microcode\n");
 
 	if (amvenc_loadmc(p, wq) < 0)
@@ -1681,9 +1682,8 @@ static irqreturn_t enc_isr(s32 irq_number, void *para)
 	struct encode_manager_s *manager = (struct encode_manager_s *)para;
 
 	enc_pr(LOG_INFO, "*****ENC_ISR*****\n");
-	WRITE_HREG(HCODEC_IRQ_MBOX_CLR, 1);
 
-	manager->encode_hw_status  = READ_HREG(ENCODER_STATUS);
+	manager->encode_hw_status  = amlvenc_hcodec_status();
 	if ((manager->encode_hw_status == ENCODER_IDR_DONE)
 		|| (manager->encode_hw_status == ENCODER_NON_IDR_DONE)
 		|| (manager->encode_hw_status == ENCODER_SEQUENCE_DONE)
@@ -1950,11 +1950,18 @@ void amvenc_avc_start_cmd(struct encode_wq_s *wq,
 		encode_manager.encode_hw_status = ENCODER_IDLE;
 		amvenc_reset();
 		avc_canvas_init(wq);
-		amlvenc_h264_init_encoder(
-			request->cmd == ENCODER_IDR, wq->pic.idr_pic_id, wq->pic.init_qppicture,
-			wq->pic.frame_number, wq->pic.log2_max_frame_num,
-			wq->pic.pic_order_cnt_lsb, wq->pic.log2_max_pic_order_cnt_lsb
-		);
+
+		struct amlvenc_h264_init_encoder_params init_params = {
+			.idr = request->cmd == ENCODER_IDR,
+			.idr_pic_id = wq->pic.idr_pic_id,
+			.init_qppicture = wq->pic.init_qppicture,
+			.frame_number = wq->pic.frame_number,
+			.log2_max_frame_num = wq->pic.log2_max_frame_num,
+			.pic_order_cnt_lsb = wq->pic.pic_order_cnt_lsb,
+			.log2_max_pic_order_cnt_lsb = wq->pic.log2_max_pic_order_cnt_lsb,
+		};
+
+		amlvenc_h264_init_encoder(&init_params);
 		amlvenc_h264_init_input_dct_buffer(wq->mem.dct_buff_start_addr, wq->mem.dct_buff_end_addr);
 		amlvenc_h264_init_output_stream_buffer(wq->mem.BitstreamStart, wq->mem.BitstreamEnd);
 
@@ -2009,29 +2016,13 @@ void amvenc_avc_start_cmd(struct encode_wq_s *wq,
 			(HENC_MB_Type_AUTO << 0);
 	else
 		ie_me_mb_type = 0;
-		
-	amlvenc_h264_configure_ie_me_parameters(
-		fixed_slice_cfg, wq->pic.rows_per_slice, ie_me_mb_type, wq->pic.encoder_height
-	);
 
-#ifdef MULTI_SLICE_MC
-	if (fixed_slice_cfg)
-		WRITE_HREG(FIXED_SLICE_CFG, fixed_slice_cfg);
-	else if (wq->pic.rows_per_slice !=
-		(wq->pic.encoder_height + 15) >> 4) {
-		u32 mb_per_slice = (wq->pic.encoder_height + 15) >> 4;
-
-		mb_per_slice = mb_per_slice * wq->pic.rows_per_slice;
-		WRITE_HREG(FIXED_SLICE_CFG, mb_per_slice);
-	} else
-		WRITE_HREG(FIXED_SLICE_CFG, 0);
-#else
-	WRITE_HREG(FIXED_SLICE_CFG, 0);
-#endif
+	amlvenc_h264_configure_ie_me(ie_me_mb_type);
+	amlvenc_h264_configure_slice(fixed_slice_cfg, wq->pic.rows_per_slice, wq->pic.encoder_height);
 
 	encode_manager.encode_hw_status = request->cmd;
 	wq->hw_status = request->cmd;
-	WRITE_HREG(ENCODER_STATUS, request->cmd);
+	amlvenc_hcodec_set_status(request->cmd);
 	if ((request->cmd == ENCODER_IDR)
 		|| (request->cmd == ENCODER_NON_IDR)
 		|| (request->cmd == ENCODER_SEQUENCE)
@@ -2100,7 +2091,7 @@ s32 amvenc_avc_start(struct encode_wq_s *wq, u32 clock)
 
 	avc_canvas_init(wq);
 
-	WRITE_HREG(HCODEC_ASSIST_MMC_CTRL1, 0x32);
+	amlvenc_hcodec_assist_enable();
 
 	if (amvenc_loadmc(p, wq) < 0)
 		return -EBUSY;
@@ -2108,11 +2099,18 @@ s32 amvenc_avc_start(struct encode_wq_s *wq, u32 clock)
 	encode_manager.process_irq = false;
 	encode_manager.encode_hw_status = ENCODER_IDLE;
 	amvenc_reset();
-	amlvenc_h264_init_encoder(
-		true, wq->pic.idr_pic_id, wq->pic.init_qppicture,
-		wq->pic.frame_number, wq->pic.log2_max_frame_num,
-		wq->pic.pic_order_cnt_lsb, wq->pic.log2_max_pic_order_cnt_lsb
-	);
+
+	struct amlvenc_h264_init_encoder_params init_params = {
+		.idr = true,
+		.idr_pic_id = wq->pic.idr_pic_id,
+		.init_qppicture = wq->pic.init_qppicture,
+		.frame_number = wq->pic.frame_number,
+		.log2_max_frame_num = wq->pic.log2_max_frame_num,
+		.pic_order_cnt_lsb = wq->pic.pic_order_cnt_lsb,
+		.log2_max_pic_order_cnt_lsb = wq->pic.log2_max_pic_order_cnt_lsb,
+	};
+
+	amlvenc_h264_init_encoder(&init_params);
 	amlvenc_h264_init_input_dct_buffer(wq->mem.dct_buff_start_addr, wq->mem.dct_buff_end_addr);  /* dct buffer setting */
 	amlvenc_h264_init_output_stream_buffer(wq->mem.BitstreamStart, wq->mem.BitstreamEnd);  /* output stream buffer */
 
@@ -2129,26 +2127,12 @@ s32 amvenc_avc_start(struct encode_wq_s *wq, u32 clock)
 	/* reference  buffer , need set before each frame start */
 	amlvenc_h264_init_input_reference_buffer(wq->mem.ref_buf_canvas);
 	amlvenc_h264_init_firmware_assist_buffer(wq->mem.assit_buffer_offset); /* assitant buffer for microcode */
-	ie_me_mb_type = 0;
-	amlvenc_h264_configure_ie_me_parameters(
-		fixed_slice_cfg, wq->pic.rows_per_slice, ie_me_mb_type, wq->pic.encoder_height
-	);
-	WRITE_HREG(ENCODER_STATUS, ENCODER_IDLE);
 
-#ifdef MULTI_SLICE_MC
-	if (fixed_slice_cfg)
-		WRITE_HREG(FIXED_SLICE_CFG, fixed_slice_cfg);
-	else if (wq->pic.rows_per_slice !=
-		(wq->pic.encoder_height + 15) >> 4) {
-		u32 mb_per_slice = (wq->pic.encoder_height + 15) >> 4;
+	amlvenc_h264_configure_ie_me(0);
 
-		mb_per_slice = mb_per_slice * wq->pic.rows_per_slice;
-		WRITE_HREG(FIXED_SLICE_CFG, mb_per_slice);
-	} else
-		WRITE_HREG(FIXED_SLICE_CFG, 0);
-#else
-	WRITE_HREG(FIXED_SLICE_CFG, 0);
-#endif
+	amlvenc_hcodec_clear_status();
+
+	amlvenc_h264_configure_slice(fixed_slice_cfg, wq->pic.rows_per_slice, wq->pic.encoder_height);
 
 	amvenc_start();
 
@@ -2717,7 +2701,7 @@ Again:
 			enc_pr(LOG_DEBUG,
 				"mb info: 0x%x, encode status: 0x%x, dct status: 0x%x ",
 				READ_HREG(HCODEC_VLC_MB_INFO),
-				READ_HREG(ENCODER_STATUS),
+				amlvenc_hcodec_status(),
 				READ_HREG(HCODEC_QDCT_STATUS_CTRL));
 			enc_pr(LOG_DEBUG,
 				"vlc status: 0x%x, me status: 0x%x, risc pc:0x%x, debug:0x%x\n",
@@ -3078,16 +3062,16 @@ static s32 encode_start_monitor(void)
 	s32 ret = 0;
 
 	if (get_cpu_type() >= MESON_CPU_MAJOR_ID_GXTVBB) {
-		y_tnr_mot2alp_nrm_gain = 216;
-		y_tnr_mot2alp_dis_gain = 144;
-		c_tnr_mot2alp_nrm_gain = 216;
-		c_tnr_mot2alp_dis_gain = 144;
+		y_tnr.mot2alp_nrm_gain = 216;
+		y_tnr.mot2alp_dis_gain = 144;
+		c_tnr.mot2alp_nrm_gain = 216;
+		c_tnr.mot2alp_dis_gain = 144;
 	} else {
 		/* more tnr */
-		y_tnr_mot2alp_nrm_gain = 144;
-		y_tnr_mot2alp_dis_gain = 96;
-		c_tnr_mot2alp_nrm_gain = 144;
-		c_tnr_mot2alp_dis_gain = 96;
+		y_tnr.mot2alp_nrm_gain = 144;
+		y_tnr.mot2alp_dis_gain = 96;
+		c_tnr.mot2alp_nrm_gain = 144;
+		c_tnr.mot2alp_dis_gain = 96;
 	}
 
 	enc_pr(LOG_DEBUG, "encode start monitor.\n");
@@ -3176,7 +3160,7 @@ static s32 encode_wq_init(void)
 	else
 		enc_canvas_offset = AMVENC_CANVAS_INDEX;
 
-	amlvenc_h264_init_me();
+	amlvenc_h264_init_me(&me);
 	if (encode_start_monitor()) {
 		enc_pr(LOG_ERROR, "encode create thread error.\n");
 		return -1;
@@ -3716,7 +3700,7 @@ static void enc_dma_buf_unmap(struct enc_dma_cfg *cfg)
 }
 
 
-module_param(fixed_slice_cfg, uint, 0664);
+module_param_named(fixed_slice_cfg, fixed_slice_cfg, uint, 0664);
 MODULE_PARM_DESC(fixed_slice_cfg, "\n fixed_slice_cfg\n");
 
 module_param(clock_level, uint, 0664);
@@ -3751,132 +3735,132 @@ MODULE_PARM_DESC(svc_ref_conf, "\n svc reference duration config\n");
 #endif
 
 #ifdef MORE_MODULE_PARAM
-module_param(me_mv_merge_ctl, uint, 0664);
+module_param_named(me_mv_merge_ctl, me.me_mv_merge_ctl, uint, 0664);
 MODULE_PARM_DESC(me_mv_merge_ctl, "\n me_mv_merge_ctl\n");
 
-module_param(me_step0_close_mv, uint, 0664);
+module_param_named(me_step0_close_mv, me.me_step0_close_mv, uint, 0664);
 MODULE_PARM_DESC(me_step0_close_mv, "\n me_step0_close_mv\n");
 
-module_param(me_f_skip_sad, uint, 0664);
+module_param_named(me_f_skip_sad, me.me_f_skip_sad, uint, 0664);
 MODULE_PARM_DESC(me_f_skip_sad, "\n me_f_skip_sad\n");
 
-module_param(me_f_skip_weight, uint, 0664);
+module_param_named(me_f_skip_weight, me.me_f_skip_weight, uint, 0664);
 MODULE_PARM_DESC(me_f_skip_weight, "\n me_f_skip_weight\n");
 
-module_param(me_mv_weight_01, uint, 0664);
+module_param_named(me_mv_weight_01, me.me_mv_weight_01, uint, 0664);
 MODULE_PARM_DESC(me_mv_weight_01, "\n me_mv_weight_01\n");
 
-module_param(me_mv_weight_23, uint, 0664);
+module_param_named(me_mv_weight_23, me.me_mv_weight_23, uint, 0664);
 MODULE_PARM_DESC(me_mv_weight_23, "\n me_mv_weight_23\n");
 
-module_param(me_sad_range_inc, uint, 0664);
+module_param_named(me_sad_range_inc, me.me_sad_range_inc, uint, 0664);
 MODULE_PARM_DESC(me_sad_range_inc, "\n me_sad_range_inc\n");
 
-module_param(me_sad_enough_01, uint, 0664);
+module_param_named(me_sad_enough_01, me.me_sad_enough_01, uint, 0664);
 MODULE_PARM_DESC(me_sad_enough_01, "\n me_sad_enough_01\n");
 
-module_param(me_sad_enough_23, uint, 0664);
+module_param_named(me_sad_enough_23, me.me_sad_enough_23, uint, 0664);
 MODULE_PARM_DESC(me_sad_enough_23, "\n me_sad_enough_23\n");
 
-module_param(y_tnr_mc_en, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mc_en, "\n y_tnr_mc_en option\n");
-module_param(y_tnr_txt_mode, uint, 0664);
-MODULE_PARM_DESC(y_tnr_txt_mode, "\n y_tnr_txt_mode option\n");
-module_param(y_tnr_mot_sad_margin, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mot_sad_margin, "\n y_tnr_mot_sad_margin option\n");
-module_param(y_tnr_mot_cortxt_rate, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mot_cortxt_rate, "\n y_tnr_mot_cortxt_rate option\n");
-module_param(y_tnr_mot_distxt_ofst, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mot_distxt_ofst, "\n y_tnr_mot_distxt_ofst option\n");
-module_param(y_tnr_mot_distxt_rate, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mot_distxt_rate, "\n y_tnr_mot_distxt_rate option\n");
-module_param(y_tnr_mot_dismot_ofst, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mot_dismot_ofst, "\n y_tnr_mot_dismot_ofst option\n");
-module_param(y_tnr_mot_frcsad_lock, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mot_frcsad_lock, "\n y_tnr_mot_frcsad_lock option\n");
-module_param(y_tnr_mot2alp_frc_gain, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mot2alp_frc_gain, "\n y_tnr_mot2alp_frc_gain option\n");
-module_param(y_tnr_mot2alp_nrm_gain, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mot2alp_nrm_gain, "\n y_tnr_mot2alp_nrm_gain option\n");
-module_param(y_tnr_mot2alp_dis_gain, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mot2alp_dis_gain, "\n y_tnr_mot2alp_dis_gain option\n");
-module_param(y_tnr_mot2alp_dis_ofst, uint, 0664);
-MODULE_PARM_DESC(y_tnr_mot2alp_dis_ofst, "\n y_tnr_mot2alp_dis_ofst option\n");
-module_param(y_tnr_alpha_min, uint, 0664);
-MODULE_PARM_DESC(y_tnr_alpha_min, "\n y_tnr_alpha_min option\n");
-module_param(y_tnr_alpha_max, uint, 0664);
-MODULE_PARM_DESC(y_tnr_alpha_max, "\n y_tnr_alpha_max option\n");
-module_param(y_tnr_deghost_os, uint, 0664);
-MODULE_PARM_DESC(y_tnr_deghost_os, "\n y_tnr_deghost_os option\n");
+module_param_named(y_tnr_mc_en, y_tnr.mc_en, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mc_en, "\n y_tnr.mc_en option\n");
+module_param_named(y_tnr_txt_mode, y_tnr.txt_mode, uint, 0664);
+MODULE_PARM_DESC(y_tnr_txt_mode, "\n y_tnr.txt_mode option\n");
+module_param_named(y_tnr_mot_sad_margin, y_tnr.mot_sad_margin, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mot_sad_margin, "\n y_tnr.mot_sad_margin option\n");
+module_param_named(y_tnr_mot_cortxt_rate, y_tnr.mot_cortxt_rate, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mot_cortxt_rate, "\n y_tnr.mot_cortxt_rate option\n");
+module_param_named(y_tnr_mot_distxt_ofst, y_tnr.mot_distxt_ofst, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mot_distxt_ofst, "\n y_tnr.mot_distxt_ofst option\n");
+module_param_named(y_tnr_mot_distxt_rate, y_tnr.mot_distxt_rate, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mot_distxt_rate, "\n y_tnr.mot_distxt_rate option\n");
+module_param_named(y_tnr_mot_dismot_ofst, y_tnr.mot_dismot_ofst, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mot_dismot_ofst, "\n y_tnr.mot_dismot_ofst option\n");
+module_param_named(y_tnr_mot_frcsad_lock, y_tnr.mot_frcsad_lock, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mot_frcsad_lock, "\n y_tnr.mot_frcsad_lock option\n");
+module_param_named(y_tnr_mot2alp_frc_gain, y_tnr.mot2alp_frc_gain, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mot2alp_frc_gain, "\n y_tnr.mot2alp_frc_gain option\n");
+module_param_named(y_tnr_mot2alp_nrm_gain, y_tnr.mot2alp_nrm_gain, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mot2alp_nrm_gain, "\n y_tnr.mot2alp_nrm_gain option\n");
+module_param_named(y_tnr_mot2alp_dis_gain, y_tnr.mot2alp_dis_gain, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mot2alp_dis_gain, "\n y_tnr.mot2alp_dis_gain option\n");
+module_param_named(y_tnr_mot2alp_dis_ofst, y_tnr.mot2alp_dis_ofst, uint, 0664);
+MODULE_PARM_DESC(y_tnr_mot2alp_dis_ofst, "\n y_tnr.mot2alp_dis_ofst option\n");
+module_param_named(y_tnr_alpha_min, y_tnr.alpha_min, uint, 0664);
+MODULE_PARM_DESC(y_tnr_alpha_min, "\n y_tnr.alpha_min option\n");
+module_param_named(y_tnr_alpha_max, y_tnr.alpha_max, uint, 0664);
+MODULE_PARM_DESC(y_tnr_alpha_max, "\n y_tnr.alpha_max option\n");
+module_param_named(y_tnr_deghost_os, y_tnr.deghost_os, uint, 0664);
+MODULE_PARM_DESC(y_tnr_deghost_os, "\n y_tnr.deghost_os option\n");
 
-module_param(c_tnr_mc_en, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mc_en, "\n c_tnr_mc_en option\n");
-module_param(c_tnr_txt_mode, uint, 0664);
-MODULE_PARM_DESC(c_tnr_txt_mode, "\n c_tnr_txt_mode option\n");
-module_param(c_tnr_mot_sad_margin, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mot_sad_margin, "\n c_tnr_mot_sad_margin option\n");
-module_param(c_tnr_mot_cortxt_rate, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mot_cortxt_rate, "\n c_tnr_mot_cortxt_rate option\n");
-module_param(c_tnr_mot_distxt_ofst, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mot_distxt_ofst, "\n c_tnr_mot_distxt_ofst option\n");
-module_param(c_tnr_mot_distxt_rate, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mot_distxt_rate, "\n c_tnr_mot_distxt_rate option\n");
-module_param(c_tnr_mot_dismot_ofst, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mot_dismot_ofst, "\n c_tnr_mot_dismot_ofst option\n");
-module_param(c_tnr_mot_frcsad_lock, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mot_frcsad_lock, "\n c_tnr_mot_frcsad_lock option\n");
-module_param(c_tnr_mot2alp_frc_gain, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mot2alp_frc_gain, "\n c_tnr_mot2alp_frc_gain option\n");
-module_param(c_tnr_mot2alp_nrm_gain, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mot2alp_nrm_gain, "\n c_tnr_mot2alp_nrm_gain option\n");
-module_param(c_tnr_mot2alp_dis_gain, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mot2alp_dis_gain, "\n c_tnr_mot2alp_dis_gain option\n");
-module_param(c_tnr_mot2alp_dis_ofst, uint, 0664);
-MODULE_PARM_DESC(c_tnr_mot2alp_dis_ofst, "\n c_tnr_mot2alp_dis_ofst option\n");
-module_param(c_tnr_alpha_min, uint, 0664);
-MODULE_PARM_DESC(c_tnr_alpha_min, "\n c_tnr_alpha_min option\n");
-module_param(c_tnr_alpha_max, uint, 0664);
-MODULE_PARM_DESC(c_tnr_alpha_max, "\n c_tnr_alpha_max option\n");
-module_param(c_tnr_deghost_os, uint, 0664);
-MODULE_PARM_DESC(c_tnr_deghost_os, "\n c_tnr_deghost_os option\n");
+module_param_named(c_tnr_mc_en, c_tnr.mc_en, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mc_en, "\n c_tnr.mc_en option\n");
+module_param_named(c_tnr_txt_mode, c_tnr.txt_mode, uint, 0664);
+MODULE_PARM_DESC(c_tnr_txt_mode, "\n c_tnr.txt_mode option\n");
+module_param_named(c_tnr_mot_sad_margin, c_tnr.mot_sad_margin, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mot_sad_margin, "\n c_tnr.mot_sad_margin option\n");
+module_param_named(c_tnr_mot_cortxt_rate, c_tnr.mot_cortxt_rate, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mot_cortxt_rate, "\n c_tnr.mot_cortxt_rate option\n");
+module_param_named(c_tnr_mot_distxt_ofst, c_tnr.mot_distxt_ofst, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mot_distxt_ofst, "\n c_tnr.mot_distxt_ofst option\n");
+module_param_named(c_tnr_mot_distxt_rate, c_tnr.mot_distxt_rate, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mot_distxt_rate, "\n c_tnr.mot_distxt_rate option\n");
+module_param_named(c_tnr_mot_dismot_ofst, c_tnr.mot_dismot_ofst, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mot_dismot_ofst, "\n c_tnr.mot_dismot_ofst option\n");
+module_param_named(c_tnr_mot_frcsad_lock, c_tnr.mot_frcsad_lock, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mot_frcsad_lock, "\n c_tnr.mot_frcsad_lock option\n");
+module_param_named(c_tnr_mot2alp_frc_gain, c_tnr.mot2alp_frc_gain, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mot2alp_frc_gain, "\n c_tnr.mot2alp_frc_gain option\n");
+module_param_named(c_tnr_mot2alp_nrm_gain, c_tnr.mot2alp_nrm_gain, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mot2alp_nrm_gain, "\n c_tnr.mot2alp_nrm_gain option\n");
+module_param_named(c_tnr_mot2alp_dis_gain, c_tnr.mot2alp_dis_gain, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mot2alp_dis_gain, "\n c_tnr.mot2alp_dis_gain option\n");
+module_param_named(c_tnr_mot2alp_dis_ofst, c_tnr.mot2alp_dis_ofst, uint, 0664);
+MODULE_PARM_DESC(c_tnr_mot2alp_dis_ofst, "\n c_tnr.mot2alp_dis_ofst option\n");
+module_param_named(c_tnr_alpha_min, c_tnr.alpha_min, uint, 0664);
+MODULE_PARM_DESC(c_tnr_alpha_min, "\n c_tnr.alpha_min option\n");
+module_param_named(c_tnr_alpha_max, c_tnr.alpha_max, uint, 0664);
+MODULE_PARM_DESC(c_tnr_alpha_max, "\n c_tnr.alpha_max option\n");
+module_param_named(c_tnr_deghost_os, c_tnr.deghost_os, uint, 0664);
+MODULE_PARM_DESC(c_tnr_deghost_os, "\n c_tnr.deghost_os option\n");
 
-module_param(y_snr_err_norm, uint, 0664);
-MODULE_PARM_DESC(y_snr_err_norm, "\n y_snr_err_norm option\n");
-module_param(y_snr_gau_bld_core, uint, 0664);
-MODULE_PARM_DESC(y_snr_gau_bld_core, "\n y_snr_gau_bld_core option\n");
-module_param(y_snr_gau_bld_ofst, int, 0664);
-MODULE_PARM_DESC(y_snr_gau_bld_ofst, "\n y_snr_gau_bld_ofst option\n");
-module_param(y_snr_gau_bld_rate, uint, 0664);
-MODULE_PARM_DESC(y_snr_gau_bld_rate, "\n y_snr_gau_bld_rate option\n");
-module_param(y_snr_gau_alp0_min, uint, 0664);
-MODULE_PARM_DESC(y_snr_gau_alp0_min, "\n y_snr_gau_alp0_min option\n");
-module_param(y_snr_gau_alp0_max, uint, 0664);
-MODULE_PARM_DESC(y_snr_gau_alp0_max, "\n y_snr_gau_alp0_max option\n");
-module_param(y_bld_beta2alp_rate, uint, 0664);
-MODULE_PARM_DESC(y_bld_beta2alp_rate, "\n y_bld_beta2alp_rate option\n");
-module_param(y_bld_beta_min, uint, 0664);
-MODULE_PARM_DESC(y_bld_beta_min, "\n y_bld_beta_min option\n");
-module_param(y_bld_beta_max, uint, 0664);
-MODULE_PARM_DESC(y_bld_beta_max, "\n y_bld_beta_max option\n");
+module_param_named(y_snr_err_norm, y_snr.err_norm, uint, 0664);
+MODULE_PARM_DESC(y_snr_err_norm, "\n y_snr.err_norm option\n");
+module_param_named(y_snr_gau_bld_core, y_snr.gau_bld_core, uint, 0664);
+MODULE_PARM_DESC(y_snr_gau_bld_core, "\n y_snr.gau_bld_core option\n");
+module_param_named(y_snr_gau_bld_ofst, y_snr.gau_bld_ofst, int, 0664);
+MODULE_PARM_DESC(y_snr_gau_bld_ofst, "\n y_snr.gau_bld_ofst option\n");
+module_param_named(y_snr_gau_bld_rate, y_snr.gau_bld_rate, uint, 0664);
+MODULE_PARM_DESC(y_snr_gau_bld_rate, "\n y_snr.gau_bld_rate option\n");
+module_param_named(y_snr_gau_alp0_min, y_snr.gau_alp0_min, uint, 0664);
+MODULE_PARM_DESC(y_snr_gau_alp0_min, "\n y_snr.gau_alp0_min option\n");
+module_param_named(y_snr_gau_alp0_max, y_snr.gau_alp0_max, uint, 0664);
+MODULE_PARM_DESC(y_snr_gau_alp0_max, "\n y_snr.gau_alp0_max option\n");
+module_param_named(y_bld_beta2alp_rate, y_snr.beta2alp_rate, uint, 0664);
+MODULE_PARM_DESC(y_bld_beta2alp_rate, "\n y_snr.beta2alp_rate option\n");
+module_param_named(y_bld_beta_min, y_snr.beta_min, uint, 0664);
+MODULE_PARM_DESC(y_bld_beta_min, "\n y_snr.beta_min option\n");
+module_param_named(y_bld_beta_max, y_snr.beta_max, uint, 0664);
+MODULE_PARM_DESC(y_bld_beta_max, "\n y_snr.beta_max option\n");
 
-module_param(c_snr_err_norm, uint, 0664);
-MODULE_PARM_DESC(c_snr_err_norm, "\n c_snr_err_norm option\n");
-module_param(c_snr_gau_bld_core, uint, 0664);
-MODULE_PARM_DESC(c_snr_gau_bld_core, "\n c_snr_gau_bld_core option\n");
-module_param(c_snr_gau_bld_ofst, int, 0664);
-MODULE_PARM_DESC(c_snr_gau_bld_ofst, "\n c_snr_gau_bld_ofst option\n");
-module_param(c_snr_gau_bld_rate, uint, 0664);
-MODULE_PARM_DESC(c_snr_gau_bld_rate, "\n c_snr_gau_bld_rate option\n");
-module_param(c_snr_gau_alp0_min, uint, 0664);
-MODULE_PARM_DESC(c_snr_gau_alp0_min, "\n c_snr_gau_alp0_min option\n");
-module_param(c_snr_gau_alp0_max, uint, 0664);
-MODULE_PARM_DESC(c_snr_gau_alp0_max, "\n c_snr_gau_alp0_max option\n");
-module_param(c_bld_beta2alp_rate, uint, 0664);
-MODULE_PARM_DESC(c_bld_beta2alp_rate, "\n c_bld_beta2alp_rate option\n");
-module_param(c_bld_beta_min, uint, 0664);
-MODULE_PARM_DESC(c_bld_beta_min, "\n c_bld_beta_min option\n");
-module_param(c_bld_beta_max, uint, 0664);
-MODULE_PARM_DESC(c_bld_beta_max, "\n c_bld_beta_max option\n");
+module_param_named(c_snr_err_norm, c_snr.err_norm, uint, 0664);
+MODULE_PARM_DESC(c_snr_err_norm, "\n c_snr.err_norm option\n");
+module_param_named(c_snr_gau_bld_core, c_snr.gau_bld_core, uint, 0664);
+MODULE_PARM_DESC(c_snr_gau_bld_core, "\n c_snr.gau_bld_core option\n");
+module_param_named(c_snr_gau_bld_ofst, c_snr.gau_bld_ofst, int, 0664);
+MODULE_PARM_DESC(c_snr_gau_bld_ofst, "\n c_snr.gau_bld_ofst option\n");
+module_param_named(c_snr_gau_bld_rate, c_snr.gau_bld_rate, uint, 0664);
+MODULE_PARM_DESC(c_snr_gau_bld_rate, "\n c_snr.gau_bld_rate option\n");
+module_param_named(c_snr_gau_alp0_min, c_snr.gau_alp0_min, uint, 0664);
+MODULE_PARM_DESC(c_snr_gau_alp0_min, "\n c_snr.gau_alp0_min option\n");
+module_param_named(c_snr_gau_alp0_max, c_snr.gau_alp0_max, uint, 0664);
+MODULE_PARM_DESC(c_snr_gau_alp0_max, "\n c_snr.gau_alp0_max option\n");
+module_param_named(c_bld_beta2alp_rate, c_snr.beta2alp_rate, uint, 0664);
+MODULE_PARM_DESC(c_bld_beta2alp_rate, "\n c_snr.beta2alp_rate option\n");
+module_param_named(c_bld_beta_min, c_snr.beta_min, uint, 0664);
+MODULE_PARM_DESC(c_bld_beta_min, "\n c_snr.beta_min option\n");
+module_param_named(c_bld_beta_max, c_snr.beta_max, uint, 0664);
+MODULE_PARM_DESC(c_bld_beta_max, "\n c_snr.beta_max option\n");
 #endif
 
 module_init(amvenc_avc_driver_init_module);
