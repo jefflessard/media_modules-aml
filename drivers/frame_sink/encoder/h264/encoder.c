@@ -119,7 +119,6 @@ static struct encode_manager_s encode_manager;
 
 /* #define ENABLE_IGNORE_FUNCTION */
 
-static u32 fixed_slice_cfg;
 static enum amlvenc_henc_mb_type ie_me_mb_type;
 static u32 ie_me_mode;
 static u32 ie_pipeline_block = 3;
@@ -186,6 +185,10 @@ static struct amlvenc_h264_me_params me = {
 	.me_sad_enough_01 = 0,/* 0x00018010, */
 	.me_sad_enough_23 = 0,/* 0x00000020, */
 };
+
+/* [31:0] NUM_ROWS_PER_SLICE_P */
+/* [15:0] NUM_ROWS_PER_SLICE_I */
+static u32 fixed_slice_cfg;
 
 /* y tnr */
 static struct amlvenc_h264_tnr_params y_tnr = {
@@ -1311,12 +1314,18 @@ void amvenc_reset(void)
 			use_reset_control) {
 		hcodec_hw_reset();
 	} else {
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
 		amlvenc_dos_sw_reset1(
 			(1 << 2)  | (1 << 6)  |
 			(1 << 7)  | (1 << 8)  |
 			(1 << 14) | (1 << 16) |
 			(1 << 17)
 		);
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
 	}
 }
 
@@ -1326,9 +1335,15 @@ void amvenc_start(void)
 			use_reset_control) {
 		hcodec_hw_reset();
 	} else {
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
 		amlvenc_dos_sw_reset1(
 			(1 << 12) | (1 << 11)
 		);
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
 	}
 
 	amlvenc_hcodec_start();
@@ -1349,6 +1364,9 @@ void amvenc_stop(void)
 			use_reset_control) {
 		hcodec_hw_reset();
 	} else {
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
 		amlvenc_dos_sw_reset1(
 			(1 << 12) | (1 << 11) |
 			(1 << 2)  | (1 << 6)  |
@@ -1356,6 +1374,9 @@ void amvenc_stop(void)
 			(1 << 14) | (1 << 16) |
 			(1 << 17)
 		);
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
+		READ_VREG(DOS_SW_RESET1);
 	}
 
 }
